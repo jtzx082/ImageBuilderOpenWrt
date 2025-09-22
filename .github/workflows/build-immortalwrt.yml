@@ -1,4 +1,4 @@
-name: Build & Release ImmortalWrt x86_64 (Full)
+name: Build & Release ImmortalWrt x86_64 (Full, RootFS=1G, Keep 3 Releases)
 
 on:
   workflow_dispatch:
@@ -15,8 +15,8 @@ on:
         description: "镜像文件名后缀"
         required: false
         default: "-custom"
-      partsize:
-        description: "固件大小 (MB)"
+      rootfs_partsize:
+        description: "RootFS 分区大小 (MB)"
         required: false
         default: "1024"
 
@@ -69,7 +69,7 @@ jobs:
           echo "merged=${MERGED}" >> "$GITHUB_OUTPUT"
           echo "Packages: $MERGED"
 
-      - name: Build firmware (all formats)
+      - name: Build firmware (all formats, RootFS=1G)
         run: |
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
           cd "$IB_DIR"
@@ -85,7 +85,7 @@ jobs:
             FILES="../${FILES_DIR}" \
             ${EXTRA_REPO_DIRS:+REPO_DIRS="$EXTRA_REPO_DIRS"} \
             EXTRA_IMAGE_NAME="${{ github.event.inputs.image_name_suffix }}" \
-            CONFIG_TARGET_IMAGES_PARTSIZE="${{ github.event.inputs.partsize }}"
+            CONFIG_TARGET_ROOTFS_PARTSIZE="${{ github.event.inputs.rootfs_partsize }}"
 
           echo "=== Build outputs ==="
           ls -lh bin/targets/x86/64/
@@ -100,9 +100,17 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "build-${{ github.run_number }}"
-          name: "ImmortalWrt Build ${{ github.run_number }}"
+          name: "ImmortalWrt Build ${{ github.run_number }} (RootFS=1G)"
           draft: false
           prerelease: false
           files: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete older releases (keep last 3)
+        uses: dev-drprasad/delete-older-releases@v0.3.3
+        with:
+          keep_latest: 3
+          delete_tags: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
