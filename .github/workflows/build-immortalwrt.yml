@@ -1,4 +1,4 @@
-name: Build & Release ImmortalWrt x86_64
+name: Build & Release ImmortalWrt x86_64 (RootFS=1024M, Keep 3 Releases, With Release Notes & SHA256)
 
 on:
   workflow_dispatch:
@@ -32,14 +32,13 @@ jobs:
             build-essential make curl ca-certificates zstd xz-utils coreutils \
             qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq
 
-      - name: Prepare files & uci-custom
+      - name: Prepare files & ensure uci-defaults executable
         run: |
           mkdir -p ${FILES_DIR}/etc/uci-defaults ${LOCAL_IPK_DIR}
           [ -f packages.txt ] || touch packages.txt
-          # 如果仓库根目录存在 uci-custom，则复制为 99-custom
-          if [ -f "uci-custom" ]; then
-            cp uci-custom ${FILES_DIR}/etc/uci-defaults/99-custom
-            chmod +x ${FILES_DIR}/etc/uci-defaults/99-custom
+          # 确保 99-custom.sh 存在并可执行
+          if [ -f "${FILES_DIR}/etc/uci-defaults/99-custom.sh" ]; then
+            chmod +x ${FILES_DIR}/etc/uci-defaults/99-custom.sh
           fi
 
       - name: Download ImageBuilder
@@ -63,7 +62,7 @@ jobs:
           echo "merged=${MERGED}" >> "$GITHUB_OUTPUT"
           echo "Packages: $MERGED"
 
-      - name: Build firmware
+      - name: Build firmware (RootFS=1024M, original filenames)
         run: |
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
           cd "$IB_DIR"
@@ -135,7 +134,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Delete older releases
+      - name: Delete older releases (keep last 3)
         uses: dev-drprasad/delete-older-releases@v0.3.3
         with:
           keep_latest: 3
