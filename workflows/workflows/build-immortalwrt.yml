@@ -1,0 +1,108 @@
+name: Build & Release ImmortalWrt x86_64
+
+on:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "额外需要包含的包 (空格分隔)"
+        required: false
+        default: ""
+      profile:
+        description: "ImageBuilder PROFILE (x86-64 默认 generic)"
+        required: false
+        default: "generic"
+      image_name_suffix:
+        description: "镜像文件名后缀"
+        required: false
+        default: "-custom"
+      partsize:
+        description: "固件大小 (MB)"
+        required: false
+        default: "1024"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      IMAGEBUILDER_URL: https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
+      FILES_DIR: files
+      LOCAL_IPK_DIR: packages
+      BIN_OUT: bin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential make curl ca-certificates zstd xz-utils coreutils
+
+      - name: Prepare directories
+        run: |
+          mkdir -p ${FILES_DIR} ${LOCAL_IPK_DIR}
+          [ -f packages.txt ] || touch packages.txt
+          if [ -d "${FILES_DIR}/etc/uci-defaults" ]; then
+            chmod +x ${FILES_DIR}/etc/uci-defaults/* || true
+          fi
+
+      - name: Download ImageBuilder
+        run: |
+          curl -L "$IMAGEBUILDER_URL" -o imagebuilder.tar.zst
+          mkdir -p imagebuilder
+          tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder
+
+      - name: Locate ImageBuilder
+        id: ib
+        run: |
+          IB_DIR="$(find imagebuilder -maxdepth 1 -type d -name 'immortalwrt-imagebuilder-*' | head -n1)"
+          echo "ib_dir=${IB_DIR}" >> "$GITHUB_OUTPUT"
+
+      - name: Merge package list
+        id: pkgs
+        run: |
+          TXT_PACKAGES="$(grep -v '^\s*#' packages.txt | sed '/^\s*$/d' | xargs || true)"
+          INPUT_PACKAGES="${{ github.event.inputs.packages }}"
+          MERGED="$(printf '%s %s\n' "$TXT_PACKAGES" "$INPUT_PACKAGES" | xargs || true)"
+          echo "merged=${MERGED}" >> "$GITHUB_OUTPUT"
+          echo "Packages: $MERGED"
+
+      - name: Build firmware
+        run: |
+          IB_DIR="${{ steps.ib.outputs.ib_dir }}"
+          cd "$IB_DIR"
+          mkdir -p "../${BIN_OUT}"
+
+          EXTRA_REPO_DIRS=""
+          if [ -n "$(ls -A "../${LOCAL_IPK_DIR}" 2>/dev/null || true)" ]; then
+            EXTRA_REPO_DIRS="../${LOCAL_IPK_DIR}"
+          fi
+
+          make -j"$(nproc)" image \
+            PROFILE="${{ github.event.inputs.profile }}" \
+            PACKAGES="${{ steps.pkgs.outputs.merged }}" \
+            FILES="../${FILES_DIR}" \
+            BIN_DIR="../${BIN_OUT}" \
+            ${EXTRA_REPO_DIRS:+REPO_DIRS="$EXTRA_REPO_DIRS"} \
+            EXTRA_IMAGE_NAME="${{ github.event.inputs.image_name_suffix }}" \
+            CONFIG_TARGET_IMAGES_PARTSIZE="${{ github.event.inputs.partsize }}"
+
+          ls -lh "../${BIN_OUT}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-x86_64-images
+          path: bin/**
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "build-${{ github.run_number }}"
+          name: "ImmortalWrt Build ${{ github.run_number }}"
+          draft: false
+          prerelease: false
+          files: bin/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
