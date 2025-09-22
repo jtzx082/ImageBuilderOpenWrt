@@ -1,5 +1,4 @@
 name: Build & Release ImmortalWrt x86_64
-
 on:
   workflow_dispatch:
     inputs:
@@ -30,15 +29,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential make curl ca-certificates zstd xz-utils coreutils \
-            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq
+            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq dos2unix
 
-      - name: Prepare files & ensure uci-defaults executable
+      - name: Prepare files & ensure 99-custom.sh executable
         run: |
           mkdir -p ${FILES_DIR}/etc/uci-defaults ${LOCAL_IPK_DIR}
           [ -f packages.txt ] || touch packages.txt
-          # 确保 99-custom.sh 存在并可执行
           if [ -f "${FILES_DIR}/etc/uci-defaults/99-custom.sh" ]; then
-            chmod +x ${FILES_DIR}/etc/uci-defaults/99-custom.sh
+            dos2unix ${FILES_DIR}/etc/uci-defaults/99-custom.sh || true
+            chmod 755 ${FILES_DIR}/etc/uci-defaults/99-custom.sh
           fi
 
       - name: Download ImageBuilder
@@ -83,6 +82,21 @@ jobs:
 
           echo "=== Build outputs ==="
           ls -lh bin/targets/x86/64/
+
+      - name: Verify 99-custom.sh in rootfs
+        run: |
+          IB_DIR="${{ steps.ib.outputs.ib_dir }}"
+          ROOTFS=$(ls $IB_DIR/bin/targets/x86/64/*rootfs.img.gz | head -n1)
+          mkdir rootfs-check
+          gunzip -c "$ROOTFS" | sudo mount -o loop -t squashfs - rootfs-check || true
+          if [ -f rootfs-check/etc/uci-defaults/99-custom.sh ]; then
+            echo "✅ 99-custom.sh 已打包进固件"
+            ls -l rootfs-check/etc/uci-defaults/99-custom.sh
+          else
+            echo "❌ 99-custom.sh 未被打包进固件"
+            exit 1
+          fi
+          sudo umount rootfs-check || true
 
       - name: Generate SHA256 checksums
         run: |
