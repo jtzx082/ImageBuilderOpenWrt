@@ -64,7 +64,7 @@ jobs:
           echo "merged=${MERGED}" >> "$GITHUB_OUTPUT"
           echo "Packages: $MERGED"
 
-      - name: Build firmware (all formats, RootFS=1G, original filenames)
+      - name: Build firmware
         run: |
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
           cd "$IB_DIR"
@@ -147,7 +147,7 @@ jobs:
           prerelease: false
           body_path: ${{ steps.notes.outputs.release_notes_path }}
           files: |
-            imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/**
+            imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/*
             imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/sha256sums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
