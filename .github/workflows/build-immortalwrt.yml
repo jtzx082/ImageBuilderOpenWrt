@@ -28,7 +28,6 @@ jobs:
       IMAGEBUILDER_URL: https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
       FILES_DIR: files
       LOCAL_IPK_DIR: packages
-      BIN_OUT: bin
 
     steps:
       - name: Checkout
@@ -39,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential make curl ca-certificates zstd xz-utils coreutils \
-            qemu-utils genisoimage grub2
+            qemu-utils genisoimage grub2 dosfstools e2fsprogs
 
       - name: Prepare directories
         run: |
@@ -70,11 +69,10 @@ jobs:
           echo "merged=${MERGED}" >> "$GITHUB_OUTPUT"
           echo "Packages: $MERGED"
 
-      - name: Build firmware
+      - name: Build firmware (all formats)
         run: |
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
           cd "$IB_DIR"
-          mkdir -p "../${BIN_OUT}"
 
           EXTRA_REPO_DIRS=""
           if [ -n "$(ls -A "../${LOCAL_IPK_DIR}" 2>/dev/null || true)" ]; then
@@ -85,18 +83,18 @@ jobs:
             PROFILE="${{ github.event.inputs.profile }}" \
             PACKAGES="${{ steps.pkgs.outputs.merged }}" \
             FILES="../${FILES_DIR}" \
-            BIN_DIR="../${BIN_OUT}" \
             ${EXTRA_REPO_DIRS:+REPO_DIRS="$EXTRA_REPO_DIRS"} \
             EXTRA_IMAGE_NAME="${{ github.event.inputs.image_name_suffix }}" \
             CONFIG_TARGET_IMAGES_PARTSIZE="${{ github.event.inputs.partsize }}"
 
-          ls -lh "../${BIN_OUT}"
+          echo "=== Build outputs ==="
+          ls -lh bin/targets/x86/64/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-x86_64-images
-          path: bin/**
+          path: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/**
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -105,6 +103,6 @@ jobs:
           name: "ImmortalWrt Build ${{ github.run_number }}"
           draft: false
           prerelease: false
-          files: bin/**
+          files: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/**
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
