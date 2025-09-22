@@ -1,4 +1,4 @@
-name: Build & Release ImmortalWrt x86_64 (Full, RootFS=1G, Keep 3 Releases)
+name: Build & Release ImmortalWrt x86_64
 
 on:
   workflow_dispatch:
