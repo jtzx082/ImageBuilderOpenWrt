@@ -10,10 +10,6 @@ on:
         description: "ImageBuilder PROFILE (x86-64 默认 generic)"
         required: false
         default: "generic"
-      rootfs_partsize:
-        description: "RootFS 分区大小 (MB)"
-        required: false
-        default: "1024"
 
 jobs:
   build:
@@ -69,6 +65,9 @@ jobs:
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
           cd "$IB_DIR"
 
+          # 强制写入 RootFS 分区大小
+          echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
+
           EXTRA_REPO_DIRS=""
           if [ -n "$(ls -A "../${LOCAL_IPK_DIR}" 2>/dev/null || true)" ]; then
             EXTRA_REPO_DIRS="../${LOCAL_IPK_DIR}"
@@ -78,8 +77,7 @@ jobs:
             PROFILE="${{ github.event.inputs.profile }}" \
             PACKAGES="${{ steps.pkgs.outputs.merged }}" \
             FILES="../${FILES_DIR}" \
-            ${EXTRA_REPO_DIRS:+REPO_DIRS="$EXTRA_REPO_DIRS"} \
-            CONFIG_TARGET_ROOTFS_PARTSIZE="${{ github.event.inputs.rootfs_partsize }}"
+            ${EXTRA_REPO_DIRS:+REPO_DIRS="$EXTRA_REPO_DIRS"}
 
           echo "=== Build outputs ==="
           ls -lh bin/targets/x86/64/
@@ -108,7 +106,7 @@ jobs:
           echo "### Build Information" > release_notes.md
           echo "- **Build Time**: ${BUILD_TIME}" >> release_notes.md
           echo "- **Profile**: ${{ github.event.inputs.profile }}" >> release_notes.md
-          echo "- **RootFS Size**: ${{ github.event.inputs.rootfs_partsize }} MB" >> release_notes.md
+          echo "- **RootFS Size**: 1024 MB" >> release_notes.md
           echo "- **Packages**:" >> release_notes.md
           if [ -s packages.txt ]; then
             sed 's/^/- /' packages.txt >> release_notes.md
@@ -142,13 +140,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "build-${{ steps.notes.outputs.build_date }}"
-          name: "ImmortalWrt Build ${{ steps.notes.outputs.build_date }} (RootFS=${{ github.event.inputs.rootfs_partsize }}M)"
+          name: "ImmortalWrt Build ${{ steps.notes.outputs.build_date }} (RootFS=1024M)"
           draft: false
           prerelease: false
           body_path: ${{ steps.notes.outputs.release_notes_path }}
-          files: |
-            imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/*
-            imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/sha256sums.txt
+          files: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
