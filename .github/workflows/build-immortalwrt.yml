@@ -1,4 +1,5 @@
-name: Build & Release ImmortalWrt x86_64
+name: Build & Release ImmortalWrt x86_64 (RootFS=1024M, Keep 3 Releases, With Release Notes & SHA256)
+
 on:
   workflow_dispatch:
     inputs:
@@ -31,10 +32,11 @@ jobs:
             build-essential make curl ca-certificates zstd xz-utils coreutils \
             qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq
 
-      - name: Prepare directories
+      - name: Prepare directories & ensure uci-defaults executable
         run: |
           mkdir -p ${FILES_DIR} ${LOCAL_IPK_DIR}
           [ -f packages.txt ] || touch packages.txt
+          # 确保 uci-defaults 脚本有执行权限
           if [ -d "${FILES_DIR}/etc/uci-defaults" ]; then
             chmod +x ${FILES_DIR}/etc/uci-defaults/* || true
           fi
@@ -60,7 +62,7 @@ jobs:
           echo "merged=${MERGED}" >> "$GITHUB_OUTPUT"
           echo "Packages: $MERGED"
 
-      - name: Build firmware
+      - name: Build firmware (RootFS=1024M, original filenames)
         run: |
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
           cd "$IB_DIR"
@@ -114,27 +116,11 @@ jobs:
           if [ -n "${{ steps.pkgs.outputs.merged }}" ]; then
             echo "- Extra: ${{ steps.pkgs.outputs.merged }}" >> release_notes.md
           fi
-
           echo "" >> release_notes.md
-          echo "### Changelog" >> release_notes.md
-          PREV_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' || true)
-          if [ -n "$PREV_TAG" ]; then
-            echo "- Comparing with previous release: $PREV_TAG" >> release_notes.md
-            gh release view "$PREV_TAG" --json body --jq '.body' | grep '^- ' | sort > old_pkgs.txt || true
-            (grep '^- ' release_notes.md | sort) > new_pkgs.txt || true
-            echo "" >> release_notes.md
-            echo "**Added Packages:**" >> release_notes.md
-            comm -13 old_pkgs.txt new_pkgs.txt || echo "None" >> release_notes.md
-            echo "" >> release_notes.md
-            echo "**Removed Packages:**" >> release_notes.md
-            comm -23 old_pkgs.txt new_pkgs.txt || echo "None" >> release_notes.md
-          else
-            echo "- First release, no previous changelog available." >> release_notes.md
-          fi
+          echo "### SHA256 Checksums" >> release_notes.md
+          cat imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/sha256sums.txt >> release_notes.md
 
           echo "release_notes_path=release_notes.md" >> $GITHUB_OUTPUT
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
