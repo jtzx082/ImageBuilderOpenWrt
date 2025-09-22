@@ -1,4 +1,4 @@
-name: Build & Release ImmortalWrt x86_64
+name: Build & Release ImmortalWrt x86_64 (Full, RootFS=1G, Keep 3 Releases)
 
 on:
   workflow_dispatch:
@@ -74,6 +74,10 @@ jobs:
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
           cd "$IB_DIR"
 
+          # 写入 rootfs 分区大小到 .config
+          echo "CONFIG_TARGET_ROOTFS_PARTSIZE=${{ github.event.inputs.rootfs_partsize }}" >> .config
+          make defconfig
+
           EXTRA_REPO_DIRS=""
           if [ -n "$(ls -A "../${LOCAL_IPK_DIR}" 2>/dev/null || true)" ]; then
             EXTRA_REPO_DIRS="../${LOCAL_IPK_DIR}"
@@ -84,8 +88,7 @@ jobs:
             PACKAGES="${{ steps.pkgs.outputs.merged }}" \
             FILES="../${FILES_DIR}" \
             ${EXTRA_REPO_DIRS:+REPO_DIRS="$EXTRA_REPO_DIRS"} \
-            EXTRA_IMAGE_NAME="${{ github.event.inputs.image_name_suffix }}" \
-            CONFIG_TARGET_ROOTFS_PARTSIZE="${{ github.event.inputs.rootfs_partsize }}"
+            EXTRA_IMAGE_NAME="${{ github.event.inputs.image_name_suffix }}"
 
           echo "=== Build outputs ==="
           ls -lh bin/targets/x86/64/
@@ -100,7 +103,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "build-${{ github.run_number }}"
-          name: "ImmortalWrt Build ${{ github.run_number }} (RootFS=1G)"
+          name: "ImmortalWrt Build ${{ github.run_number }} (RootFS=${{ github.event.inputs.rootfs_partsize }}M)"
           draft: false
           prerelease: false
           files: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/**
