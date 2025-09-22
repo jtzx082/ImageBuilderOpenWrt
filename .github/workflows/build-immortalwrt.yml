@@ -1,5 +1,4 @@
-name: Build & Release ImmortalWrt x86_64 (Full, RootFS=1G, Keep 3 Releases)
-
+name: Build & Release ImmortalWrt x86_64
 on:
   workflow_dispatch:
     inputs:
@@ -11,10 +10,6 @@ on:
         description: "ImageBuilder PROFILE (x86-64 默认 generic)"
         required: false
         default: "generic"
-      image_name_suffix:
-        description: "镜像文件名后缀"
-        required: false
-        default: "-custom"
       rootfs_partsize:
         description: "RootFS 分区大小 (MB)"
         required: false
@@ -38,7 +33,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential make curl ca-certificates zstd xz-utils coreutils \
-            qemu-utils genisoimage grub2 dosfstools e2fsprogs
+            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq
 
       - name: Prepare directories
         run: |
@@ -69,14 +64,10 @@ jobs:
           echo "merged=${MERGED}" >> "$GITHUB_OUTPUT"
           echo "Packages: $MERGED"
 
-      - name: Build firmware (all formats, RootFS=1G)
+      - name: Build firmware (all formats, RootFS=1G, original filenames)
         run: |
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
           cd "$IB_DIR"
-
-          # 写入 rootfs 分区大小到 .config
-          echo "CONFIG_TARGET_ROOTFS_PARTSIZE=${{ github.event.inputs.rootfs_partsize }}" >> .config
-          make defconfig
 
           EXTRA_REPO_DIRS=""
           if [ -n "$(ls -A "../${LOCAL_IPK_DIR}" 2>/dev/null || true)" ]; then
@@ -88,10 +79,17 @@ jobs:
             PACKAGES="${{ steps.pkgs.outputs.merged }}" \
             FILES="../${FILES_DIR}" \
             ${EXTRA_REPO_DIRS:+REPO_DIRS="$EXTRA_REPO_DIRS"} \
-            EXTRA_IMAGE_NAME="${{ github.event.inputs.image_name_suffix }}"
+            CONFIG_TARGET_ROOTFS_PARTSIZE="${{ github.event.inputs.rootfs_partsize }}"
 
           echo "=== Build outputs ==="
           ls -lh bin/targets/x86/64/
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/
+          sha256sum * > sha256sums.txt
+          echo "Generated sha256sums.txt:"
+          cat sha256sums.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -99,14 +97,58 @@ jobs:
           name: immortalwrt-x86_64-images
           path: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/**
 
+      - name: Generate release notes
+        id: notes
+        run: |
+          BUILD_TIME="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+          BUILD_DATE="$(date '+%Y-%m-%d')"
+          echo "build_time=${BUILD_TIME}" >> $GITHUB_OUTPUT
+          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+
+          echo "### Build Information" > release_notes.md
+          echo "- **Build Time**: ${BUILD_TIME}" >> release_notes.md
+          echo "- **Profile**: ${{ github.event.inputs.profile }}" >> release_notes.md
+          echo "- **RootFS Size**: ${{ github.event.inputs.rootfs_partsize }} MB" >> release_notes.md
+          echo "- **Packages**:" >> release_notes.md
+          if [ -s packages.txt ]; then
+            sed 's/^/- /' packages.txt >> release_notes.md
+          fi
+          if [ -n "${{ steps.pkgs.outputs.merged }}" ]; then
+            echo "- Extra: ${{ steps.pkgs.outputs.merged }}" >> release_notes.md
+          fi
+
+          echo "" >> release_notes.md
+          echo "### Changelog" >> release_notes.md
+          PREV_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' || true)
+          if [ -n "$PREV_TAG" ]; then
+            echo "- Comparing with previous release: $PREV_TAG" >> release_notes.md
+            gh release view "$PREV_TAG" --json body --jq '.body' | grep '^- ' | sort > old_pkgs.txt || true
+            (grep '^- ' release_notes.md | sort) > new_pkgs.txt || true
+            echo "" >> release_notes.md
+            echo "**Added Packages:**" >> release_notes.md
+            comm -13 old_pkgs.txt new_pkgs.txt || echo "None" >> release_notes.md
+            echo "" >> release_notes.md
+            echo "**Removed Packages:**" >> release_notes.md
+            comm -23 old_pkgs.txt new_pkgs.txt || echo "None" >> release_notes.md
+          else
+            echo "- First release, no previous changelog available." >> release_notes.md
+          fi
+
+          echo "release_notes_path=release_notes.md" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "build-${{ github.run_number }}"
-          name: "ImmortalWrt Build ${{ github.run_number }} (RootFS=${{ github.event.inputs.rootfs_partsize }}M)"
+          tag_name: "build-${{ steps.notes.outputs.build_date }}"
+          name: "ImmortalWrt Build ${{ steps.notes.outputs.build_date }} (RootFS=${{ github.event.inputs.rootfs_partsize }}M)"
           draft: false
           prerelease: false
-          files: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/**
+          body_path: ${{ steps.notes.outputs.release_notes_path }}
+          files: |
+            imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/**
+            imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/sha256sums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
