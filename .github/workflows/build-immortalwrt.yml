@@ -1,4 +1,4 @@
-name: Build & Release ImmortalWrt x86_64
+name: Build & Release ImmortalWrt x86_64 (Full)
 
 on:
   workflow_dispatch:
@@ -37,7 +37,9 @@ jobs:
       - name: Install prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential make curl ca-certificates zstd xz-utils coreutils qemu-utils
+          sudo apt-get install -y \
+            build-essential make curl ca-certificates zstd xz-utils coreutils \
+            qemu-utils genisoimage grub2
 
       - name: Prepare directories
         run: |
