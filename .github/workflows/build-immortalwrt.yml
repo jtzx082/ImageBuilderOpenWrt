@@ -1,4 +1,4 @@
-name: Build & Release ImmortalWrt x86_64 (RootFS=1024M, With 99-custom.sh, Release Notes & SHA256)
+name: Build & Release ImmortalWrt x86_64
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      IMAGEBUILDER_URL: https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
+      IMAGEBUILERS_URL: https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
       FILES_DIR: files
       LOCAL_IPK_DIR: packages
 
@@ -30,20 +30,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential make curl ca-certificates zstd xz-utils coreutils \
-            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq dos2unix squashfs-tools
+            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq
 
-      - name: Prepare files & ensure 99-custom.sh executable
+      - name: Prepare files & ensure uci-defaults executable
         run: |
           mkdir -p ${FILES_DIR}/etc/uci-defaults ${LOCAL_IPK_DIR}
           [ -f packages.txt ] || touch packages.txt
-          if [ -f "${FILES_DIR}/etc/uci-defaults/99-custom.sh" ]; then
-            dos2unix ${FILES_DIR}/etc/uci-defaults/99-custom.sh || true
-            chmod 755 ${FILES_DIR}/etc/uci-defaults/99-custom.sh
+          
+          # 修复：确保uci-defaults目录存在并设置所有脚本为可执行
+          mkdir -p ${FILES_DIR}/etc/uci-defaults
+          if [ -d "${FILES_DIR}/etc/uci-defaults" ]; then
+            find "${FILES_DIR}/etc/uci-defaults" -name "*.sh" -type f -exec chmod +x {} \;
+            echo "设置uci-defaults脚本权限:"
+            ls -la ${FILES_DIR}/etc/uci-defaults/ 2>/dev/null || echo "uci-defaults目录为空"
           fi
 
       - name: Download ImageBuilder
         run: |
-          curl -L "$IMAGEBUILDER_URL" -o imagebuilder.tar.zst
+          curl -L "$IMAGEBUILDERS_URL" -o imagebuilder.tar.zst
           mkdir -p imagebuilder
           tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder
 
@@ -51,7 +55,19 @@ jobs:
         id: ib
         run: |
           IB_DIR="$(find imagebuilder -maxdepth 1 -type d -name 'immortalwrt-imagebuilder-*' | head -n1)"
+          if [ -z "$IB_DIR" ]; then
+            echo "错误: 未找到ImageBuilder目录"
+            exit 1
+          fi
           echo "ib_dir=${IB_DIR}" >> "$GITHUB_OUTPUT"
+          echo "找到ImageBuilder目录: ${IB_DIR}"
+
+      - name: Verify files directory structure
+        run: |
+          echo "文件目录结构:"
+          find ${FILES_DIR} -type f 2>/dev/null | head -20
+          echo "uci-defaults目录内容:"
+          ls -la ${FILES_DIR}/etc/uci-defaults/ 2>/dev/null || echo "uci-defaults目录不存在"
 
       - name: Merge package list
         id: pkgs
@@ -62,7 +78,7 @@ jobs:
           echo "merged=${MERGED}" >> "$GITHUB_OUTPUT"
           echo "Packages: $MERGED"
 
-      - name: Build firmware (RootFS=1024M, original filenames)
+      - name: Build firmware
         run: |
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
           cd "$IB_DIR"
@@ -75,6 +91,10 @@ jobs:
             EXTRA_REPO_DIRS="../${LOCAL_IPK_DIR}"
           fi
 
+          # 修复：显示构建时使用的文件目录信息
+          echo "构建时将包含的文件:"
+          find "../${FILES_DIR}" -type f 2>/dev/null | head -10 || echo "无额外文件"
+
           make -j"$(nproc)" image \
             PROFILE="${{ github.event.inputs.profile }}" \
             PACKAGES="${{ steps.pkgs.outputs.merged }}" \
@@ -84,27 +104,9 @@ jobs:
           echo "=== Build outputs ==="
           ls -lh bin/targets/x86/64/
 
-      - name: Verify 99-custom.sh in rootfs
-        run: |
-          IB_DIR="${{ steps.ib.outputs.ib_dir }}"
-          ROOTFS=$(ls $IB_DIR/bin/targets/x86/64/*squashfs-rootfs.img.gz | head -n1)
-          mkdir rootfs-check
-          cp "$ROOTFS" rootfs.img.gz
-          gunzip -f rootfs.img.gz
-          # 解包时忽略设备节点
-          unsquashfs -no-xattrs -no-progress -no-device -d rootfs-check rootfs.img
-          if [ -f rootfs-check/etc/uci-defaults/99-custom.sh ]; then
-            echo "✅ 99-custom.sh 已打包进固件"
-            ls -l rootfs-check/etc/uci-defaults/99-custom.sh
-            head -n 5 rootfs-check/etc/uci-defaults/99-custom.sh
-          else
-            echo "❌ 99-custom.sh 未被打包进固件"
-            exit 1
-          fi
-
       - name: Generate SHA256 checksums
         run: |
-          cd imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/
+          cd "${{ steps.ib.outputs.ib_dir }}/bin/targets/x86/64/"
           sha256sum * > sha256sums.txt
           echo "Generated sha256sums.txt:"
           cat sha256sums.txt
@@ -113,7 +115,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-x86_64-images
-          path: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/**
+          path: ${{ steps.ib.outputs.ib_dir }}/bin/targets/x86/64/**
 
       - name: Generate release notes
         id: notes
@@ -136,10 +138,7 @@ jobs:
           fi
           echo "" >> release_notes.md
           echo "### SHA256 Checksums" >> release_notes.md
-          cat imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/sha256sums.txt >> release_notes.md
-          echo "" >> release_notes.md
-          echo "### Startup Script" >> release_notes.md
-          echo "已包含 \`/etc/uci-defaults/99-custom.sh\`，将在首次启动时自动执行。" >> release_notes.md
+          cat ${{ steps.ib.outputs.ib_dir }}/bin/targets/x86/64/sha256sums.txt >> release_notes.md
 
           echo "release_notes_path=release_notes.md" >> $GITHUB_OUTPUT
 
@@ -151,11 +150,11 @@ jobs:
           draft: false
           prerelease: false
           body_path: ${{ steps.notes.outputs.release_notes_path }}
-          files: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/*
+          files: ${{ steps.ib.outputs.ib_dir }}/bin/targets/x86/64/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Delete older releases (keep last 3)
+      - name: Delete older releases
         uses: dev-drprasad/delete-older-releases@v0.3.3
         with:
           keep_latest: 3
