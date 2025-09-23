@@ -18,7 +18,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses5-dev gawk git wget unzip \
-            file libssl-dev python3 zstd qemu-utils
+            file libssl-dev python3 zstd qemu-utils genisoimage grub2
 
       - name: Download ImageBuilder
         run: |
