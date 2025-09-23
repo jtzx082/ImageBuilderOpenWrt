@@ -63,26 +63,7 @@ jobs:
           else
             echo "错误: ${FILES_DIR}/etc/uci-defaults/99-custom.sh 文件不存在!"
             echo "请确保仓库中有 files/etc/uci-defaults/99-custom.sh 文件"
-            # 创建一个简单的测试脚本（可选，用于调试）
-            cat > "${FILES_DIR}/etc/uci-defaults/99-custom.sh" << 'EOF'
-#!/bin/sh
-# 测试脚本 - 首次启动时运行
-logger -t uci-defaults "99-custom.sh 开始执行"
-
-# 示例：设置时区
-uci set system.@system[0].timezone='CST-8'
-uci set system.@system[0].zonename='Asia/Shanghai'
-
-# 提交更改
-uci commit
-
-logger -t uci-defaults "99-custom.sh 执行完成"
-exit 0
-EOF
-            chmod +x "${FILES_DIR}/etc/uci-defaults/99-custom.sh"
-            echo "已创建测试版本的 99-custom.sh"
-          fi
-
+           
       - name: Download ImageBuilder
         run: |
           curl -L "$IMAGEBUILDER_URL" -o imagebuilder.tar.zst
