@@ -1,4 +1,4 @@
-name: Build & Release ImmortalWrt x86_64
+name: Build & Release ImmortalWrt x86_64 (RootFS=1024M, With 99-custom.sh, Release Notes & SHA256)
 
 on:
   workflow_dispatch:
@@ -91,10 +91,12 @@ jobs:
           mkdir rootfs-check
           cp "$ROOTFS" rootfs.img.gz
           gunzip -f rootfs.img.gz
-          unsquashfs -d rootfs-check rootfs.img
+          # 解包时忽略设备节点
+          unsquashfs -no-xattrs -no-progress -no-device -d rootfs-check rootfs.img
           if [ -f rootfs-check/etc/uci-defaults/99-custom.sh ]; then
             echo "✅ 99-custom.sh 已打包进固件"
             ls -l rootfs-check/etc/uci-defaults/99-custom.sh
+            head -n 5 rootfs-check/etc/uci-defaults/99-custom.sh
           else
             echo "❌ 99-custom.sh 未被打包进固件"
             exit 1
