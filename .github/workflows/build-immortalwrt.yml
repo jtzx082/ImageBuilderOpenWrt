@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      IMAGEBUILERS_URL: https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
+      IMAGEBUILDER_URL: https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
       FILES_DIR: files
       LOCAL_IPK_DIR: packages
 
@@ -37,7 +37,7 @@ jobs:
           mkdir -p ${FILES_DIR}/etc/uci-defaults ${LOCAL_IPK_DIR}
           [ -f packages.txt ] || touch packages.txt
           
-          # 修复：确保uci-defaults目录存在并设置所有脚本为可执行
+          # 确保uci-defaults目录存在并设置所有脚本为可执行
           mkdir -p ${FILES_DIR}/etc/uci-defaults
           if [ -d "${FILES_DIR}/etc/uci-defaults" ]; then
             find "${FILES_DIR}/etc/uci-defaults" -name "*.sh" -type f -exec chmod +x {} \;
@@ -47,7 +47,7 @@ jobs:
 
       - name: Download ImageBuilder
         run: |
-          curl -L "$IMAGEBUILDERS_URL" -o imagebuilder.tar.zst
+          curl -L "$IMAGEBUILDER_URL" -o imagebuilder.tar.zst
           mkdir -p imagebuilder
           tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder
 
@@ -91,7 +91,7 @@ jobs:
             EXTRA_REPO_DIRS="../${LOCAL_IPK_DIR}"
           fi
 
-          # 修复：显示构建时使用的文件目录信息
+          # 显示构建时使用的文件目录信息
           echo "构建时将包含的文件:"
           find "../${FILES_DIR}" -type f 2>/dev/null | head -10 || echo "无额外文件"
 
