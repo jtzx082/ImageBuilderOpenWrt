@@ -32,18 +32,42 @@ jobs:
             build-essential make curl ca-certificates zstd xz-utils coreutils \
             qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq
 
-      - name: Prepare files & ensure uci-defaults executable
+      - name: Create and prepare uci-defaults script
         run: |
+          # 创建必要的目录
           mkdir -p ${FILES_DIR}/etc/uci-defaults ${LOCAL_IPK_DIR}
           [ -f packages.txt ] || touch packages.txt
           
-          # 确保uci-defaults目录存在并设置所有脚本为可执行
-          mkdir -p ${FILES_DIR}/etc/uci-defaults
-          if [ -d "${FILES_DIR}/etc/uci-defaults" ]; then
-            find "${FILES_DIR}/etc/uci-defaults" -name "*.sh" -type f -exec chmod +x {} \;
-            echo "设置uci-defaults脚本权限:"
-            ls -la ${FILES_DIR}/etc/uci-defaults/ 2>/dev/null || echo "uci-defaults目录为空"
-          fi
+          # 创建或确保99-custom.sh脚本存在
+          cat > ${FILES_DIR}/etc/uci-defaults/99-custom.sh << 'EOF'
+#!/bin/sh
+
+# 修改LAN接口的默认IP地址
+uci set network.lan.ipaddr='10.0.0.1'
+
+# 添加eth2和eth3到device配置
+uci add_list network.@device[0].ports='eth2'
+uci add_list network.@device[0].ports='eth3'
+
+# 设置root密码为password
+echo -e "password\npassword" | passwd root
+
+# 应用更改
+uci commit network
+
+# 标记此脚本已执行
+touch /etc/uci-defaults/99-custom-executed
+
+exit 0
+EOF
+
+          # 设置脚本权限
+          chmod +x ${FILES_DIR}/etc/uci-defaults/99-custom.sh
+          
+          echo "创建的uci-defaults脚本内容:"
+          cat ${FILES_DIR}/etc/uci-defaults/99-custom.sh
+          echo "脚本权限:"
+          ls -la ${FILES_DIR}/etc/uci-defaults/99-custom.sh
 
       - name: Download ImageBuilder
         run: |
@@ -95,9 +119,13 @@ jobs:
           echo "构建时将包含的文件:"
           find "../${FILES_DIR}" -type f 2>/dev/null | head -10 || echo "无额外文件"
 
+          # 确保包含必要的包
+          REQUIRED_PACKAGES="shadow passwd"
+          FINAL_PACKAGES="$REQUIRED_PACKAGES ${{ steps.pkgs.outputs.merged }}"
+          
           make -j"$(nproc)" image \
             PROFILE="${{ github.event.inputs.profile }}" \
-            PACKAGES="${{ steps.pkgs.outputs.merged }}" \
+            PACKAGES="$FINAL_PACKAGES" \
             FILES="../${FILES_DIR}" \
             ${EXTRA_REPO_DIRS:+REPO_DIRS="$EXTRA_REPO_DIRS"}
 
