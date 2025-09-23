@@ -2,3 +2,8 @@ openssh-sftp-server
 luci-i18n-base-zh-cn
 luci-i18n-firewall-zh-cn
 luci-i18n-package-manager-zh-cn
+luci-app-homeproxy
+luci-i18n-homeproxy-zh-cn
+ddns-go
+luci-app-ddns-go
+luci-i18n-ddns-go-zh-cn
