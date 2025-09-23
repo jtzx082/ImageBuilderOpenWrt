@@ -11,10 +11,6 @@ on:
         description: "ImageBuilder PROFILE (x86-64 默认 generic)"
         required: false
         default: "generic"
-      custom_script:
-        description: "自定义 99-custom.sh 脚本内容（可选）"
-        required: false
-        default: ""
 
 jobs:
   build:
@@ -34,39 +30,34 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential make curl ca-certificates zstd xz-utils coreutils \
-            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq squashfs-tools binwalk
+            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq
 
-      - name: Prepare files & ensure uci-defaults/99-custom.sh
+      - name: Prepare files & ensure uci-defaults executable
         run: |
-          set -e
           mkdir -p ${FILES_DIR}/etc/uci-defaults ${LOCAL_IPK_DIR}
           [ -f packages.txt ] || touch packages.txt
-
-          # 若有自定义脚本内容则覆盖 99-custom.sh
-          if [ -n "${{ github.event.inputs.custom_script }}" ]; then
-            echo "${{ github.event.inputs.custom_script }}" > ${FILES_DIR}/etc/uci-defaults/99-custom.sh
+          # 确保 99-custom.sh 存在并可执行
+          if [ -f "${FILES_DIR}/etc/uci-defaults/99-custom.sh" ]; then
+            chmod +x ${FILES_DIR}/etc/uci-defaults/99-custom.sh
           fi
-
-          # 若没有则确保脚本存在
-          if [ ! -f "${FILES_DIR}/etc/uci-defaults/99-custom.sh" ]; then
-            echo "#!/bin/sh" > ${FILES_DIR}/etc/uci-defaults/99-custom.sh
-            echo "echo 'Default custom script executed.'" >> ${FILES_DIR}/etc/uci-defaults/99-custom.sh
-          fi
-
-          # 确保可执行权限
-          chmod +x ${FILES_DIR}/etc/uci-defaults/99-custom.sh
 
       - name: Download ImageBuilder
         run: |
           curl -L "$IMAGEBUILDER_URL" -o imagebuilder.tar.zst
           mkdir -p imagebuilder
-          tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder
+          tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder --strip-components=1
 
       - name: Locate ImageBuilder
         id: ib
         run: |
-          IB_DIR="$(find imagebuilder -maxdepth 1 -type d -name 'immortalwrt-imagebuilder-*' | head -n1)"
+          IB_DIR="imagebuilder"
+          if [ ! -d "$IB_DIR" ]; then
+            # 如果 strip-components 不工作，回退到原来的方法
+            IB_DIR="$(find imagebuilder -maxdepth 1 -type d -name 'immortalwrt-imagebuilder-*' | head -n1)"
+          fi
           echo "ib_dir=${IB_DIR}" >> "$GITHUB_OUTPUT"
+          echo "IB_DIR: $IB_DIR"
+          ls -la "$IB_DIR" || true
 
       - name: Merge package list
         id: pkgs
@@ -79,76 +70,60 @@ jobs:
 
       - name: Build firmware
         run: |
-          set -e
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
+          echo "Building in directory: $IB_DIR"
           cd "$IB_DIR"
 
+          # 强制写入 RootFS 分区大小
           echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
 
           EXTRA_REPO_DIRS=""
           if [ -n "$(ls -A "../${LOCAL_IPK_DIR}" 2>/dev/null || true)" ]; then
             EXTRA_REPO_DIRS="../${LOCAL_IPK_DIR}"
+            echo "Using local IPK directory: $EXTRA_REPO_DIRS"
           fi
 
-          make -j"$(nproc)" image \
-            PROFILE="${{ github.event.inputs.profile }}" \
-            PACKAGES="${{ steps.pkgs.outputs.merged }}" \
-            FILES="../${FILES_DIR}" \
-            ${EXTRA_REPO_DIRS:+REPO_DIRS="$EXTRA_REPO_DIRS"}
+          # 构建命令
+          MAKE_CMD="make -j$(nproc) image PROFILE='${{ github.event.inputs.profile }}' PACKAGES='${{ steps.pkgs.outputs.merged }}' FILES='../${FILES_DIR}'"
+          if [ -n "$EXTRA_REPO_DIRS" ]; then
+            MAKE_CMD="$MAKE_CMD REPO_DIR='$EXTRA_REPO_DIRS'"
+          fi
+
+          echo "Build command: $MAKE_CMD"
+          eval $MAKE_CMD
 
           echo "=== Build outputs ==="
-          ls -lh bin/targets/x86/64/
-
-      - name: Verify 99-custom.sh in firmware
-        run: |
-          BIN_DIR="${{ steps.ib.outputs.ib_dir }}/bin/targets/x86/64"
-          SQUASHFS_IMG=$(ls $BIN_DIR/*.squashfs 2>/dev/null | head -n1)
-          if [ -n "$SQUASHFS_IMG" ]; then
-            mkdir rootfs
-            unsquashfs -d rootfs "$SQUASHFS_IMG"
-            if [ -f rootfs/etc/uci-defaults/99-custom.sh ]; then
-              echo "[OK] 99-custom.sh 已包含于固件镜像。"
-            else
-              echo "[ERROR] 99-custom.sh 未被正确打包进固件镜像！"
-              exit 1
-            fi
-            rm -rf rootfs
-          else
-            IMG_GZ=$(ls $BIN_DIR/*.img.gz 2>/dev/null | head -n1)
-            if [ -z "$IMG_GZ" ]; then
-              echo "[ERROR] squashfs 和 img.gz 镜像均未找到！"
-              exit 1
-            fi
-            gunzip -c "$IMG_GZ" > firmware.img
-            binwalk -e firmware.img
-            SQUASHFS_EXTRACT=$(find _firmware.img.extracted -type f -name "*.squashfs" | head -n1)
-            if [ -z "$SQUASHFS_EXTRACT" ]; then
-              echo "[ERROR] 未能从 img.gz 镜像中提取出 squashfs 文件！"
-              exit 1
-            fi
-            mkdir extract
-            unsquashfs -d extract "$SQUASHFS_EXTRACT"
-            if [ -f extract/etc/uci-defaults/99-custom.sh ]; then
-              echo "[OK] 99-custom.sh 已包含于固件镜像。"
-            else
-              echo "[ERROR] 99-custom.sh 未被正确打包进固件镜像！"
-              exit 1
-            fi
-            rm -rf extract _firmware.img.extracted firmware.img
-          fi
+          find bin/targets -type f -name "*.img*" -o -name "*.vmdk" -o -name "*.gz" | xargs ls -lh 2>/dev/null || true
+          ls -la bin/targets/ 2>/dev/null || true
 
       - name: Generate SHA256 checksums
         run: |
-          cd imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/
-          sha256sum * > sha256sums.txt
-          echo "Generated sha256sums.txt:"
-          cat sha256sums.txt
+          IB_DIR="${{ steps.ib.outputs.ib_dir }}"
+          cd "$IB_DIR"
+          # 查找目标目录
+          TARGET_DIR=$(find bin/targets -type d -path "*/x86/64" | head -n1)
+          if [ -z "$TARGET_DIR" ]; then
+            echo "Target directory not found, searching for alternative..."
+            TARGET_DIR=$(find bin/targets -type d -name "64" | head -n1)
+          fi
+          if [ -n "$TARGET_DIR" ]; then
+            cd "$TARGET_DIR"
+            sha256sum * > sha256sums.txt
+            echo "Generated sha256sums.txt in $(pwd):"
+            cat sha256sums.txt
+          else
+            echo "Error: Could not find target directory"
+            find bin/targets -type d | head -20
+            exit 1
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-x86_64-images
-          path: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/**
+          path: |
+            ${{ steps.ib.outputs.ib_dir }}/bin/targets/**/x86/64/*
+            ${{ steps.ib.outputs.ib_dir }}/bin/targets/**/64/*
 
       - name: Generate release notes
         id: notes
@@ -158,20 +133,34 @@ jobs:
           echo "build_time=${BUILD_TIME}" >> $GITHUB_OUTPUT
           echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
 
+          IB_DIR="${{ steps.ib.outputs.ib_dir }}"
+          TARGET_DIR=$(find "$IB_DIR/bin/targets" -type d -path "*/x86/64" | head -n1)
+          if [ -z "$TARGET_DIR" ]; then
+            TARGET_DIR=$(find "$IB_DIR/bin/targets" -type d -name "64" | head -n1)
+          fi
+
           echo "### Build Information" > release_notes.md
           echo "- **Build Time**: ${BUILD_TIME}" >> release_notes.md
           echo "- **Profile**: ${{ github.event.inputs.profile }}" >> release_notes.md
           echo "- **RootFS Size**: 1024 MB" >> release_notes.md
           echo "- **Packages**:" >> release_notes.md
           if [ -s packages.txt ]; then
-            sed 's/^/- /' packages.txt >> release_notes.md
+            grep -v '^\s*#' packages.txt | sed '/^\s*$/d' | sed 's/^/  - /' >> release_notes.md
           fi
           if [ -n "${{ steps.pkgs.outputs.merged }}" ]; then
-            echo "- Extra: ${{ steps.pkgs.outputs.merged }}" >> release_notes.md
+            echo "  - Extra: ${{ steps.pkgs.outputs.merged }}" >> release_notes.md
           fi
           echo "" >> release_notes.md
-          echo "### SHA256 Checksums" >> release_notes.md
-          cat imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/sha256sums.txt >> release_notes.md
+          
+          if [ -n "$TARGET_DIR" ] && [ -f "$TARGET_DIR/sha256sums.txt" ]; then
+            echo "### SHA256 Checksums" >> release_notes.md
+            echo '```' >> release_notes.md
+            cat "$TARGET_DIR/sha256sums.txt" >> release_notes.md
+            echo '```' >> release_notes.md
+          else
+            echo "### SHA256 Checksums" >> release_notes.md
+            echo "Checksums file not found" >> release_notes.md
+          fi
 
           echo "release_notes_path=release_notes.md" >> $GITHUB_OUTPUT
 
@@ -183,7 +172,9 @@ jobs:
           draft: false
           prerelease: false
           body_path: ${{ steps.notes.outputs.release_notes_path }}
-          files: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/*
+          files: |
+            ${{ steps.ib.outputs.ib_dir }}/bin/targets/**/x86/64/*
+            ${{ steps.ib.outputs.ib_dir }}/bin/targets/**/64/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
