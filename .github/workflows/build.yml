@@ -1,14 +1,19 @@
-name: Build ImmortalWrt Firmware
+name: Build & Release ImmortalWrt Firmware
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
+    inputs:
+      release_tag:
+        description: "Release tag (e.g. v2025.09.23)"
+        required: true
+        default: "auto-build"
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        profile: [generic, efi]   # 同时构建 generic 和 efi
 
     steps:
       - name: Checkout repository
@@ -37,15 +42,44 @@ jobs:
           cp -v uci-custom imagebuilder/files/etc/uci-defaults/99-custom
           chmod +x imagebuilder/files/etc/uci-defaults/99-custom
 
-      - name: Build firmware
+      - name: Build firmware (${{ matrix.profile }})
         run: |
           cd imagebuilder
-          # 读取 packages.list 中的插件
           PKGS=$(tr '\n' ' ' < ../packages.list)
-          make image PROFILE="generic" PACKAGES="$PKGS" FILES="files"
+          make image PROFILE="${{ matrix.profile }}" PACKAGES="$PKGS" FILES="files"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: immortalwrt-firmware
+          name: immortalwrt-${{ matrix.profile }}
           path: imagebuilder/bin/targets/x86/64/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./firmware
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag }}
+          name: "ImmortalWrt Firmware ${{ github.event.inputs.release_tag }}"
+          body: |
+            自动构建的 ImmortalWrt 固件  
+            - 包含自定义 ipk  
+            - 包含 packages.list 插件  
+            - 启动时执行 uci-custom 脚本  
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload firmware to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag }}
+          files: ./firmware/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
