@@ -30,16 +30,47 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential make curl ca-certificates zstd xz-utils coreutils \
-            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq
+            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq dos2unix
 
       - name: Prepare files & ensure uci-defaults executable
         run: |
           mkdir -p ${FILES_DIR}/etc/uci-defaults ${LOCAL_IPK_DIR}
           [ -f packages.txt ] || touch packages.txt
-          # 确保 99-custom.sh 存在并可执行
+          
+          # 确保 uci-defaults 目录存在并设置正确权限
+          mkdir -p ${FILES_DIR}/etc/uci-defaults
+          chmod 755 ${FILES_DIR}/etc/uci-defaults
+          
+          # 确保 99-custom.sh 存在并可执行，并转换为 Unix 格式
           if [ -f "${FILES_DIR}/etc/uci-defaults/99-custom.sh" ]; then
+            echo "Found 99-custom.sh, setting permissions and converting line endings..."
+            dos2unix ${FILES_DIR}/etc/uci-defaults/99-custom.sh
+            chmod +x ${FILES_DIR}/etc/uci-defaults/99-custom.sh
+            # 验证脚本语法
+            bash -n ${FILES_DIR}/etc/uci-defaults/99-custom.sh && echo "Script syntax OK" || echo "Script syntax error"
+          else
+            echo "Creating default 99-custom.sh script..."
+            cat > ${FILES_DIR}/etc/uci-defaults/99-custom.sh << 'EOF'
+#!/bin/sh
+# Custom script executed on first boot
+logger -t custom "99-custom.sh started at $(date)"
+
+# 设置时区（如果需要）
+# uci set system.@system[0].timezone='CST-8'
+# uci set system.@system[0].zonename='Asia/Shanghai'
+
+# 提交更改
+# uci commit
+
+logger -t custom "99-custom.sh completed at $(date)"
+exit 0
+EOF
             chmod +x ${FILES_DIR}/etc/uci-defaults/99-custom.sh
           fi
+          
+          # 验证文件结构
+          echo "Files directory structure:"
+          find ${FILES_DIR} -type f -exec ls -la {} \;
 
       - name: Download ImageBuilder
         run: |
@@ -52,7 +83,6 @@ jobs:
         run: |
           IB_DIR="imagebuilder"
           if [ ! -f "$IB_DIR/Makefile" ]; then
-            # 如果 strip-components 不工作，回退到原来的方法
             IB_DIR="$(find imagebuilder -maxdepth 1 -type d -name 'immortalwrt-imagebuilder-*' | head -n1)"
           fi
           echo "ib_dir=${IB_DIR}" >> "$GITHUB_OUTPUT"
@@ -64,9 +94,15 @@ jobs:
         run: |
           TXT_PACKAGES="$(grep -v '^\s*#' packages.txt | sed '/^\s*$/d' | xargs || true)"
           INPUT_PACKAGES="${{ github.event.inputs.packages }}"
-          MERGED="$(printf '%s %s\n' "$TXT_PACKAGES" "$INPUT_PACKAGES" | xargs || true)"
+          MERGED="$(printf '%s %s\n' "$TXT_PACKAGES" "$INPUT_PACKACKAGES" | xargs || true)"
           echo "merged=${MERGED}" >> "$GITHUB_OUTPUT"
           echo "Packages: $MERGED"
+
+      - name: Verify files are included in build
+        run: |
+          echo "Checking if custom files will be included:"
+          ls -la ${FILES_DIR}/etc/uci-defaults/ || true
+          find ${FILES_DIR} -name "*.sh" -exec echo "Found script: {}" \; -exec head -5 {} \;
 
       - name: Build firmware
         run: |
@@ -83,8 +119,12 @@ jobs:
             echo "Using local IPK directory: $EXTRA_REPO_DIRS"
           fi
 
-          # 构建命令
-          MAKE_CMD="make -j$(nproc) image PROFILE='${{ github.event.inputs.profile }}' PACKAGES='${{ steps.pkgs.outputs.merged }}' FILES='../${FILES_DIR}'"
+          # 确保 FILES 目录存在
+          echo "FILES directory contents:"
+          ls -la "../${FILES_DIR}" || echo "FILES directory not found"
+
+          # 构建命令 - 添加详细输出
+          MAKE_CMD="make -j$(nproc) V=s image PROFILE='${{ github.event.inputs.profile }}' PACKAGES='${{ steps.pkgs.outputs.merged }}' FILES='../${FILES_DIR}'"
           if [ -n "$EXTRA_REPO_DIRS" ]; then
             MAKE_CMD="$MAKE_CMD REPO_DIR='$EXTRA_REPO_DIRS'"
           fi
@@ -99,10 +139,8 @@ jobs:
         run: |
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
           cd "$IB_DIR"
-          # 查找目标目录
           TARGET_DIR=$(find bin/targets -type d -path "*/x86/64" | head -n1)
           if [ -z "$TARGET_DIR" ]; then
-            echo "Target directory not found, searching for alternative..."
             TARGET_DIR=$(find bin/targets -type d -name "64" | head -n1)
           fi
           if [ -n "$TARGET_DIR" ]; then
@@ -112,7 +150,6 @@ jobs:
             cat sha256sums.txt
           else
             echo "Error: Could not find target directory"
-            find bin/targets -type d | head -20
             exit 1
           fi
 
@@ -126,11 +163,9 @@ jobs:
           fi
           
           if [ -n "$TARGET_DIR" ]; then
-            # 列出所有构建产物
             echo "Build artifacts found:"
             ls -la "$TARGET_DIR"
             
-            # 创建文件列表
             ARTIFACT_PATHS=""
             for file in "$TARGET_DIR"/*; do
               if [ -f "$file" ]; then
@@ -138,7 +173,6 @@ jobs:
               fi
             done
             
-            # 使用 base64 编码避免换行符问题
             echo "artifact_paths=$(echo $ARTIFACT_PATHS | base64 -w0)" >> $GITHUB_OUTPUT
             echo "target_dir=$TARGET_DIR" >> $GITHUB_OUTPUT
           else
@@ -166,6 +200,7 @@ jobs:
           echo "- **Build Time**: ${BUILD_TIME}" >> release_notes.md
           echo "- **Profile**: ${{ github.event.inputs.profile }}" >> release_notes.md
           echo "- **RootFS Size**: 1024 MB" >> release_notes.md
+          echo "- **Custom Script**: 99-custom.sh included" >> release_notes.md
           echo "- **Packages**:" >> release_notes.md
           if [ -s packages.txt ]; then
             grep -v '^\s*#' packages.txt | sed '/^\s*$/d' | sed 's/^/  - /' >> release_notes.md
@@ -180,9 +215,6 @@ jobs:
             echo '```' >> release_notes.md
             cat "$TARGET_DIR/sha256sums.txt" >> release_notes.md
             echo '```' >> release_notes.md
-          else
-            echo "### SHA256 Checksums" >> release_notes.md
-            echo "Checksums file not found" >> release_notes.md
           fi
 
           echo "release_notes_path=release_notes.md" >> $GITHUB_OUTPUT
@@ -190,14 +222,11 @@ jobs:
       - name: Delete old release if exists
         run: |
           TAG_NAME="build-${{ steps.notes.outputs.build_date }}"
-          # 检查发布是否存在
           if curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
              "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG_NAME" | grep -q '"id":'; then
             echo "Deleting existing release: $TAG_NAME"
-            # 获取发布ID
             RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG_NAME" | jq -r '.id')
-            # 删除发布
             curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
             echo "Release deleted successfully"
