@@ -32,42 +32,56 @@ jobs:
             build-essential make curl ca-certificates zstd xz-utils coreutils \
             qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq
 
-      - name: Create and prepare uci-defaults script
+      - name: Prepare files & ensure uci-defaults executable
         run: |
-          # 创建必要的目录
           mkdir -p ${FILES_DIR}/etc/uci-defaults ${LOCAL_IPK_DIR}
           [ -f packages.txt ] || touch packages.txt
           
-          # 创建或确保99-custom.sh脚本存在
-          cat > ${FILES_DIR}/etc/uci-defaults/99-custom.sh << 'EOF'
+          # 确保uci-defaults目录存在且脚本可执行
+          echo "检查文件结构:"
+          find ${FILES_DIR} -type f 2>/dev/null | sort || echo "无自定义文件"
+          
+          # 设置uci-defaults目录中所有脚本为可执行
+          if [ -d "${FILES_DIR}/etc/uci-defaults" ]; then
+            echo "设置uci-defaults脚本权限:"
+            find "${FILES_DIR}/etc/uci-defaults" -type f -name "*.sh" -exec chmod +x {} \;
+            echo "脚本列表:"
+            ls -la ${FILES_DIR}/etc/uci-defaults/ 2>/dev/null || echo "uci-defaults目录为空"
+          else
+            echo "警告: ${FILES_DIR}/etc/uci-defaults 目录不存在"
+            # 创建目录并添加一个示例脚本（可选）
+            mkdir -p ${FILES_DIR}/etc/uci-defaults
+          fi
+          
+          # 验证99-custom.sh是否存在且可执行
+          if [ -f "${FILES_DIR}/etc/uci-defaults/99-custom.sh" ]; then
+            chmod +x "${FILES_DIR}/etc/uci-defaults/99-custom.sh"
+            echo "99-custom.sh 权限设置成功:"
+            ls -la "${FILES_DIR}/etc/uci-defaults/99-custom.sh"
+            echo "脚本内容预览(前10行):"
+            head -10 "${FILES_DIR}/etc/uci-defaults/99-custom.sh"
+          else
+            echo "错误: ${FILES_DIR}/etc/uci-defaults/99-custom.sh 文件不存在!"
+            echo "请确保仓库中有 files/etc/uci-defaults/99-custom.sh 文件"
+            # 创建一个简单的测试脚本（可选，用于调试）
+            cat > "${FILES_DIR}/etc/uci-defaults/99-custom.sh" << 'EOF'
 #!/bin/sh
+# 测试脚本 - 首次启动时运行
+logger -t uci-defaults "99-custom.sh 开始执行"
 
-# 修改LAN接口的默认IP地址
-uci set network.lan.ipaddr='10.0.0.1'
+# 示例：设置时区
+uci set system.@system[0].timezone='CST-8'
+uci set system.@system[0].zonename='Asia/Shanghai'
 
-# 添加eth2和eth3到device配置
-uci add_list network.@device[0].ports='eth2'
-uci add_list network.@device[0].ports='eth3'
+# 提交更改
+uci commit
 
-# 设置root密码为password
-echo -e "password\npassword" | passwd root
-
-# 应用更改
-uci commit network
-
-# 标记此脚本已执行
-touch /etc/uci-defaults/99-custom-executed
-
+logger -t uci-defaults "99-custom.sh 执行完成"
 exit 0
 EOF
-
-          # 设置脚本权限
-          chmod +x ${FILES_DIR}/etc/uci-defaults/99-custom.sh
-          
-          echo "创建的uci-defaults脚本内容:"
-          cat ${FILES_DIR}/etc/uci-defaults/99-custom.sh
-          echo "脚本权限:"
-          ls -la ${FILES_DIR}/etc/uci-defaults/99-custom.sh
+            chmod +x "${FILES_DIR}/etc/uci-defaults/99-custom.sh"
+            echo "已创建测试版本的 99-custom.sh"
+          fi
 
       - name: Download ImageBuilder
         run: |
@@ -86,13 +100,6 @@ EOF
           echo "ib_dir=${IB_DIR}" >> "$GITHUB_OUTPUT"
           echo "找到ImageBuilder目录: ${IB_DIR}"
 
-      - name: Verify files directory structure
-        run: |
-          echo "文件目录结构:"
-          find ${FILES_DIR} -type f 2>/dev/null | head -20
-          echo "uci-defaults目录内容:"
-          ls -la ${FILES_DIR}/etc/uci-defaults/ 2>/dev/null || echo "uci-defaults目录不存在"
-
       - name: Merge package list
         id: pkgs
         run: |
@@ -101,6 +108,23 @@ EOF
           MERGED="$(printf '%s %s\n' "$TXT_PACKAGES" "$INPUT_PACKAGES" | xargs || true)"
           echo "merged=${MERGED}" >> "$GITHUB_OUTPUT"
           echo "Packages: $MERGED"
+
+      - name: Verify build environment
+        run: |
+          echo "=== 构建环境验证 ==="
+          echo "ImageBuilder目录: ${{ steps.ib.outputs.ib_dir }}"
+          echo "文件目录结构:"
+          find ${FILES_DIR} -type f 2>/dev/null | sort || echo "无自定义文件"
+          
+          echo "uci-defaults目录内容:"
+          ls -la ${FILES_DIR}/etc/uci-defaults/ 2>/dev/null || echo "目录不存在"
+          
+          if [ -f "${FILES_DIR}/etc/uci-defaults/99-custom.sh" ]; then
+            echo "99-custom.sh 验证:"
+            ls -la "${FILES_DIR}/etc/uci-defaults/99-custom.sh"
+            echo "文件类型:"
+            file "${FILES_DIR}/etc/uci-defaults/99-custom.sh"
+          fi
 
       - name: Build firmware
         run: |
@@ -115,35 +139,39 @@ EOF
             EXTRA_REPO_DIRS="../${LOCAL_IPK_DIR}"
           fi
 
-          # 显示构建时使用的文件目录信息
-          echo "构建时将包含的文件:"
-          find "../${FILES_DIR}" -type f 2>/dev/null | head -10 || echo "无额外文件"
-
-          # 确保包含必要的包
-          REQUIRED_PACKAGES="shadow passwd"
-          FINAL_PACKAGES="$REQUIRED_PACKAGES ${{ steps.pkgs.outputs.merged }}"
+          # 显示构建参数用于调试
+          echo "=== 构建参数 ==="
+          echo "PROFILE: ${{ github.event.inputs.profile }}"
+          echo "PACKAGES: ${{ steps.pkgs.outputs.merged }}"
+          echo "FILES: ../${FILES_DIR}"
+          echo "REPO_DIRS: ${EXTRA_REPO_DIRS}"
           
+          # 验证FILES目录是否存在
+          echo "检查FILES目录:"
+          ls -la "../${FILES_DIR}" || echo "FILES目录不存在"
+          
+          # 执行构建
           make -j"$(nproc)" image \
             PROFILE="${{ github.event.inputs.profile }}" \
-            PACKAGES="$FINAL_PACKAGES" \
+            PACKAGES="${{ steps.pkgs.outputs.merged }}" \
             FILES="../${FILES_DIR}" \
             ${EXTRA_REPO_DIRS:+REPO_DIRS="$EXTRA_REPO_DIRS"}
 
-          echo "=== Build outputs ==="
+          echo "=== 构建输出 ==="
           ls -lh bin/targets/x86/64/
 
       - name: Generate SHA256 checksums
         run: |
-          cd "${{ steps.ib.outputs.ib_dir }}/bin/targets/x86/64/"
+          cd imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/
           sha256sum * > sha256sums.txt
-          echo "Generated sha256sums.txt:"
+          echo "生成的SHA256校验和:"
           cat sha256sums.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-x86_64-images
-          path: ${{ steps.ib.outputs.ib_dir }}/bin/targets/x86/64/**
+          path: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/**
 
       - name: Generate release notes
         id: notes
@@ -157,6 +185,7 @@ EOF
           echo "- **Build Time**: ${BUILD_TIME}" >> release_notes.md
           echo "- **Profile**: ${{ github.event.inputs.profile }}" >> release_notes.md
           echo "- **RootFS Size**: 1024 MB" >> release_notes.md
+          echo "- **首次启动脚本**: files/etc/uci-defaults/99-custom.sh" >> release_notes.md
           echo "- **Packages**:" >> release_notes.md
           if [ -s packages.txt ]; then
             sed 's/^/- /' packages.txt >> release_notes.md
@@ -166,7 +195,7 @@ EOF
           fi
           echo "" >> release_notes.md
           echo "### SHA256 Checksums" >> release_notes.md
-          cat ${{ steps.ib.outputs.ib_dir }}/bin/targets/x86/64/sha256sums.txt >> release_notes.md
+          cat imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/sha256sums.txt >> release_notes.md
 
           echo "release_notes_path=release_notes.md" >> $GITHUB_OUTPUT
 
@@ -178,7 +207,7 @@ EOF
           draft: false
           prerelease: false
           body_path: ${{ steps.notes.outputs.release_notes_path }}
-          files: ${{ steps.ib.outputs.ib_dir }}/bin/targets/x86/64/*
+          files: imagebuilder/immortalwrt-imagebuilder-*/bin/targets/x86/64/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
