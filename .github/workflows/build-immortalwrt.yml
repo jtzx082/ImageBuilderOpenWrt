@@ -19,6 +19,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
       IMAGEBUILDER_URL: https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
       FILES_DIR: files
@@ -33,7 +34,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential make curl ca-certificates zstd xz-utils coreutils \
-            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq
+            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq squashfs-tools
 
       - name: Prepare files & ensure uci-defaults/99-custom.sh
         run: |
@@ -102,18 +103,21 @@ jobs:
       - name: Verify 99-custom.sh in firmware
         run: |
           BIN_DIR="${{ steps.ib.outputs.ib_dir }}/bin/targets/x86/64"
-          FIRMWARE_IMG=$(ls $BIN_DIR/*.img.gz | head -n1)
-          if [ -z "$FIRMWARE_IMG" ]; then
-            echo "Firmware image not found!"
+          # 寻找 squashfs 镜像
+          SQUASHFS_IMG=$(ls $BIN_DIR/*.squashfs 2>/dev/null | head -n1)
+          if [ -z "$SQUASHFS_IMG" ]; then
+            echo "[ERROR] squashfs 镜像未找到！"
             exit 1
           fi
-          # 检查 99-custom.sh 是否存在于固件
-          if ! (tar -tvf $FIRMWARE_IMG 2>/dev/null | grep 'etc/uci-defaults/99-custom.sh'); then
+          mkdir rootfs
+          unsquashfs -d rootfs "$SQUASHFS_IMG"
+          if [ -f rootfs/etc/uci-defaults/99-custom.sh ]; then
+            echo "[OK] 99-custom.sh 已包含于固件镜像。"
+          else
             echo "[ERROR] 99-custom.sh 未被正确打包进固件镜像！"
             exit 1
-          else
-            echo "[OK] 99-custom.sh 已包含于固件镜像。"
           fi
+          rm -rf rootfs
 
       - name: Generate SHA256 checksums
         run: |
