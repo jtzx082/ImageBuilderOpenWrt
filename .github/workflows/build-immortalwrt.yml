@@ -51,7 +51,7 @@ jobs:
         id: ib
         run: |
           IB_DIR="imagebuilder"
-          if [ ! -d "$IB_DIR" ]; then
+          if [ ! -f "$IB_DIR/Makefile" ]; then
             # 如果 strip-components 不工作，回退到原来的方法
             IB_DIR="$(find imagebuilder -maxdepth 1 -type d -name 'immortalwrt-imagebuilder-*' | head -n1)"
           fi
@@ -93,8 +93,7 @@ jobs:
           eval $MAKE_CMD
 
           echo "=== Build outputs ==="
-          find bin/targets -type f -name "*.img*" -o -name "*.vmdk" -o -name "*.gz" | xargs ls -lh 2>/dev/null || true
-          ls -la bin/targets/ 2>/dev/null || true
+          find bin/targets -type f -name "*.img*" -o -name "*.vmdk" -o -name "*.gz" -o -name "*.iso" | xargs ls -lh 2>/dev/null || true
 
       - name: Generate SHA256 checksums
         run: |
@@ -117,13 +116,41 @@ jobs:
             exit 1
           fi
 
+      - name: Collect build artifacts
+        id: artifacts
+        run: |
+          IB_DIR="${{ steps.ib.outputs.ib_dir }}"
+          TARGET_DIR=$(find "$IB_DIR/bin/targets" -type d -path "*/x86/64" | head -n1)
+          if [ -z "$TARGET_DIR" ]; then
+            TARGET_DIR=$(find "$IB_DIR/bin/targets" -type d -name "64" | head -n1)
+          fi
+          
+          if [ -n "$TARGET_DIR" ]; then
+            # 列出所有构建产物
+            echo "Build artifacts found:"
+            ls -la "$TARGET_DIR"
+            
+            # 创建文件列表
+            ARTIFACT_PATHS=""
+            for file in "$TARGET_DIR"/*; do
+              if [ -f "$file" ]; then
+                ARTIFACT_PATHS="$ARTIFACT_PATHS $file"
+              fi
+            done
+            
+            # 使用 base64 编码避免换行符问题
+            echo "artifact_paths=$(echo $ARTIFACT_PATHS | base64 -w0)" >> $GITHUB_OUTPUT
+            echo "target_dir=$TARGET_DIR" >> $GITHUB_OUTPUT
+          else
+            echo "Error: Target directory not found"
+            exit 1
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-x86_64-images
-          path: |
-            ${{ steps.ib.outputs.ib_dir }}/bin/targets/**/x86/64/*
-            ${{ steps.ib.outputs.ib_dir }}/bin/targets/**/64/*
+          path: ${{ steps.artifacts.outputs.target_dir }}/*
 
       - name: Generate release notes
         id: notes
@@ -133,11 +160,7 @@ jobs:
           echo "build_time=${BUILD_TIME}" >> $GITHUB_OUTPUT
           echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
 
-          IB_DIR="${{ steps.ib.outputs.ib_dir }}"
-          TARGET_DIR=$(find "$IB_DIR/bin/targets" -type d -path "*/x86/64" | head -n1)
-          if [ -z "$TARGET_DIR" ]; then
-            TARGET_DIR=$(find "$IB_DIR/bin/targets" -type d -name "64" | head -n1)
-          fi
+          TARGET_DIR="${{ steps.artifacts.outputs.target_dir }}"
 
           echo "### Build Information" > release_notes.md
           echo "- **Build Time**: ${BUILD_TIME}" >> release_notes.md
@@ -164,6 +187,24 @@ jobs:
 
           echo "release_notes_path=release_notes.md" >> $GITHUB_OUTPUT
 
+      - name: Delete old release if exists
+        run: |
+          TAG_NAME="build-${{ steps.notes.outputs.build_date }}"
+          # 检查发布是否存在
+          if curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG_NAME" | grep -q '"id":'; then
+            echo "Deleting existing release: $TAG_NAME"
+            # 获取发布ID
+            RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG_NAME" | jq -r '.id')
+            # 删除发布
+            curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
+            echo "Release deleted successfully"
+          else
+            echo "No existing release found for tag: $TAG_NAME"
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -173,12 +214,15 @@ jobs:
           prerelease: false
           body_path: ${{ steps.notes.outputs.release_notes_path }}
           files: |
-            ${{ steps.ib.outputs.ib_dir }}/bin/targets/**/x86/64/*
-            ${{ steps.ib.outputs.ib_dir }}/bin/targets/**/64/*
+            ${{ steps.artifacts.outputs.target_dir }}/*.img.gz
+            ${{ steps.artifacts.outputs.target_dir }}/*.qcow2.gz
+            ${{ steps.artifacts.outputs.target_dir }}/*.iso
+            ${{ steps.artifacts.outputs.target_dir }}/sha256sums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Delete older releases
+        if: success()
         uses: dev-drprasad/delete-older-releases@v0.3.3
         with:
           keep_latest: 3
