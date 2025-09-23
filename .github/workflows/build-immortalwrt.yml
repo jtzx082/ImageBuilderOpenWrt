@@ -11,11 +11,14 @@ on:
         description: "ImageBuilder PROFILE (x86-64 默认 generic)"
         required: false
         default: "generic"
+      custom_script:
+        description: "自定义 99-custom.sh 脚本内容（可选）"
+        required: false
+        default: ""
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     env:
       IMAGEBUILDER_URL: https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
       FILES_DIR: files
@@ -32,14 +35,25 @@ jobs:
             build-essential make curl ca-certificates zstd xz-utils coreutils \
             qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq
 
-      - name: Prepare files & ensure uci-defaults executable
+      - name: Prepare files & ensure uci-defaults/99-custom.sh
         run: |
+          set -e
           mkdir -p ${FILES_DIR}/etc/uci-defaults ${LOCAL_IPK_DIR}
           [ -f packages.txt ] || touch packages.txt
-          # 确保 99-custom.sh 存在并可执行
-          if [ -f "${FILES_DIR}/etc/uci-defaults/99-custom.sh" ]; then
-            chmod +x ${FILES_DIR}/etc/uci-defaults/99-custom.sh
+
+          # 若有自定义脚本内容则覆盖 99-custom.sh
+          if [ -n "${{ github.event.inputs.custom_script }}" ]; then
+            echo "${{ github.event.inputs.custom_script }}" > ${FILES_DIR}/etc/uci-defaults/99-custom.sh
           fi
+
+          # 若没有则确保脚本存在
+          if [ ! -f "${FILES_DIR}/etc/uci-defaults/99-custom.sh" ]; then
+            echo "#!/bin/sh" > ${FILES_DIR}/etc/uci-defaults/99-custom.sh
+            echo "echo 'Default custom script executed.'" >> ${FILES_DIR}/etc/uci-defaults/99-custom.sh
+          fi
+
+          # 确保可执行权限
+          chmod +x ${FILES_DIR}/etc/uci-defaults/99-custom.sh
 
       - name: Download ImageBuilder
         run: |
@@ -64,10 +78,11 @@ jobs:
 
       - name: Build firmware
         run: |
+          set -e
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
           cd "$IB_DIR"
 
-          # 强制写入 RootFS 分区大小
+          # 设置 RootFS 分区大小
           echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
 
           EXTRA_REPO_DIRS=""
@@ -83,6 +98,22 @@ jobs:
 
           echo "=== Build outputs ==="
           ls -lh bin/targets/x86/64/
+
+      - name: Verify 99-custom.sh in firmware
+        run: |
+          BIN_DIR="${{ steps.ib.outputs.ib_dir }}/bin/targets/x86/64"
+          FIRMWARE_IMG=$(ls $BIN_DIR/*.img.gz | head -n1)
+          if [ -z "$FIRMWARE_IMG" ]; then
+            echo "Firmware image not found!"
+            exit 1
+          fi
+          # 检查 99-custom.sh 是否存在于固件
+          if ! (tar -tvf $FIRMWARE_IMG 2>/dev/null | grep 'etc/uci-defaults/99-custom.sh'); then
+            echo "[ERROR] 99-custom.sh 未被正确打包进固件镜像！"
+            exit 1
+          else
+            echo "[OK] 99-custom.sh 已包含于固件镜像。"
+          fi
 
       - name: Generate SHA256 checksums
         run: |
