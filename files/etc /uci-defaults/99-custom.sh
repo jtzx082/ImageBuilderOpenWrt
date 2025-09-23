@@ -12,3 +12,5 @@ echo -e "password\npassword" | passwd root
 
 # 应用更改
 uci commit network
+
+exit 0
