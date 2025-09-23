@@ -34,7 +34,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential make curl ca-certificates zstd xz-utils coreutils \
-            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq squashfs-tools
+            qemu-utils genisoimage grub2 dosfstools e2fsprogs gzip tzdata jq squashfs-tools binwalk
 
       - name: Prepare files & ensure uci-defaults/99-custom.sh
         run: |
@@ -83,7 +83,6 @@ jobs:
           IB_DIR="${{ steps.ib.outputs.ib_dir }}"
           cd "$IB_DIR"
 
-          # 设置 RootFS 分区大小
           echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
 
           EXTRA_REPO_DIRS=""
@@ -103,21 +102,40 @@ jobs:
       - name: Verify 99-custom.sh in firmware
         run: |
           BIN_DIR="${{ steps.ib.outputs.ib_dir }}/bin/targets/x86/64"
-          # 寻找 squashfs 镜像
           SQUASHFS_IMG=$(ls $BIN_DIR/*.squashfs 2>/dev/null | head -n1)
-          if [ -z "$SQUASHFS_IMG" ]; then
-            echo "[ERROR] squashfs 镜像未找到！"
-            exit 1
-          fi
-          mkdir rootfs
-          unsquashfs -d rootfs "$SQUASHFS_IMG"
-          if [ -f rootfs/etc/uci-defaults/99-custom.sh ]; then
-            echo "[OK] 99-custom.sh 已包含于固件镜像。"
+          if [ -n "$SQUASHFS_IMG" ]; then
+            mkdir rootfs
+            unsquashfs -d rootfs "$SQUASHFS_IMG"
+            if [ -f rootfs/etc/uci-defaults/99-custom.sh ]; then
+              echo "[OK] 99-custom.sh 已包含于固件镜像。"
+            else
+              echo "[ERROR] 99-custom.sh 未被正确打包进固件镜像！"
+              exit 1
+            fi
+            rm -rf rootfs
           else
-            echo "[ERROR] 99-custom.sh 未被正确打包进固件镜像！"
-            exit 1
+            IMG_GZ=$(ls $BIN_DIR/*.img.gz 2>/dev/null | head -n1)
+            if [ -z "$IMG_GZ" ]; then
+              echo "[ERROR] squashfs 和 img.gz 镜像均未找到！"
+              exit 1
+            fi
+            gunzip -c "$IMG_GZ" > firmware.img
+            binwalk -e firmware.img
+            SQUASHFS_EXTRACT=$(find _firmware.img.extracted -type f -name "*.squashfs" | head -n1)
+            if [ -z "$SQUASHFS_EXTRACT" ]; then
+              echo "[ERROR] 未能从 img.gz 镜像中提取出 squashfs 文件！"
+              exit 1
+            fi
+            mkdir extract
+            unsquashfs -d extract "$SQUASHFS_EXTRACT"
+            if [ -f extract/etc/uci-defaults/99-custom.sh ]; then
+              echo "[OK] 99-custom.sh 已包含于固件镜像。"
+            else
+              echo "[ERROR] 99-custom.sh 未被正确打包进固件镜像！"
+              exit 1
+            fi
+            rm -rf extract _firmware.img.extracted firmware.img
           fi
-          rm -rf rootfs
 
       - name: Generate SHA256 checksums
         run: |
