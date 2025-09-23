@@ -1,19 +1,14 @@
-name: Build & Release ImmortalWrt Firmware
+name: Build ImmortalWrt Firmware
 
 on:
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: "Release tag (e.g. v2025.09.23)"
-        required: true
-        default: "auto-build"
+  push:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        profile: [generic, efi]   # 同时构建 generic 和 efi
 
     steps:
       - name: Checkout repository
@@ -22,64 +17,40 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk git \
-            subversion libssl-dev wget unzip zstd
+          sudo apt-get install -y build-essential libncurses5-dev gawk git wget unzip \
+            file libssl-dev python3 zstd
 
-      - name: Download ImmortalWrt ImageBuilder
+      - name: Download ImageBuilder
         run: |
           wget https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
           tar -I zstd -xf immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
           mv immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64 imagebuilder
 
-      - name: Copy custom packages
-        run: |
-          mkdir -p imagebuilder/packages
-          cp -v packages/*.ipk imagebuilder/packages/ || true
-
-      - name: Prepare uci-defaults script
+      - name: Prepare custom files
         run: |
           mkdir -p imagebuilder/files/etc/uci-defaults
-          cp -v uci-custom imagebuilder/files/etc/uci-defaults/99-custom
-          chmod +x imagebuilder/files/etc/uci-defaults/99-custom
+          cp uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
+          mkdir -p imagebuilder/packages
+          cp packages/*.ipk imagebuilder/packages/ || true
 
-      - name: Build firmware (${{ matrix.profile }})
+      - name: Build firmware
+        working-directory: imagebuilder
         run: |
-          cd imagebuilder
+          # 读取 packages.list 并拼接成参数
           PKGS=$(tr '\n' ' ' < ../packages.list)
-          make image PROFILE="${{ matrix.profile }}" PACKAGES="$PKGS" FILES="files"
+          make image \
+            PACKAGES="$PKGS" \
+            FILES="files" \
+            EXTRA_IMAGE_NAME="custom"
 
-      - name: Upload firmware artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: immortalwrt-${{ matrix.profile }}
-          path: imagebuilder/bin/targets/x86/64/
+          name: immortalwrt-firmware
+          path: imagebuilder/bin/targets/x86/64/*
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./firmware
-
-      - name: Create Release
+      - name: Release firmware
         uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          tag_name: ${{ github.event.inputs.release_tag }}
-          name: "ImmortalWrt Firmware ${{ github.event.inputs.release_tag }}"
-          body: |
-            自动构建的 ImmortalWrt 固件  
-            - 包含自定义 ipk  
-            - 包含 packages.list 插件  
-            - 启动时执行 uci-custom 脚本  
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload firmware to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.release_tag }}
-          files: ./firmware/**/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: imagebuilder/bin/targets/x86/64/*
