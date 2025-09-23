@@ -33,19 +33,14 @@ jobs:
           mkdir -p imagebuilder/packages
           cp packages/*.ipk imagebuilder/packages/ || true
 
-      - name: Configure rootfs size
-        working-directory: imagebuilder
-        run: |
-          echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
-          make defconfig
-
       - name: Build firmware
         working-directory: imagebuilder
         run: |
           PKGS=$(tr '\n' ' ' < ../packages.list)
           make image \
             PACKAGES="$PKGS" \
-            FILES="files"
+            FILES="files" \
+            CONFIG_TARGET_ROOTFS_PARTSIZE=1024
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
