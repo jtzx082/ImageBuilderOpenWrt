@@ -36,12 +36,11 @@ jobs:
       - name: Build firmware
         working-directory: imagebuilder
         run: |
-          # 读取 packages.list 并拼接成参数
           PKGS=$(tr '\n' ' ' < ../packages.list)
           make image \
             PACKAGES="$PKGS" \
             FILES="files" \
-            EXTRA_IMAGE_NAME="custom"
+            CONFIG_TARGET_ROOTFS_PARTSIZE=1024
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -49,8 +48,19 @@ jobs:
           name: immortalwrt-firmware
           path: imagebuilder/bin/targets/x86/64/*
 
-      - name: Release firmware
+      - name: Generate tag name
+        id: tag
+        run: |
+          DATE=$(date +'%Y%m%d')
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          echo "TAG=auto-${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
+          echo "Generated tag: auto-${DATE}-${SHORT_SHA}"
+
+      - name: Create Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
+          tag_name: ${{ env.TAG }}
+          name: "ImmortalWrt Firmware ${{ env.TAG }}"
+          draft: false
+          prerelease: false
           files: imagebuilder/bin/targets/x86/64/*
