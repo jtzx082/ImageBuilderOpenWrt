@@ -1,0 +1,51 @@
+name: Build ImmortalWrt Firmware
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev gawk git \
+            subversion libssl-dev wget unzip zstd
+
+      - name: Download ImmortalWrt ImageBuilder
+        run: |
+          wget https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
+          tar -I zstd -xf immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
+          mv immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64 imagebuilder
+
+      - name: Copy custom packages
+        run: |
+          mkdir -p imagebuilder/packages
+          cp -v packages/*.ipk imagebuilder/packages/ || true
+
+      - name: Prepare uci-defaults script
+        run: |
+          mkdir -p imagebuilder/files/etc/uci-defaults
+          cp -v uci-custom imagebuilder/files/etc/uci-defaults/99-custom
+          chmod +x imagebuilder/files/etc/uci-defaults/99-custom
+
+      - name: Build firmware
+        run: |
+          cd imagebuilder
+          # 读取 packages.list 中的插件
+          PKGS=$(tr '\n' ' ' < ../packages.list)
+          make image PROFILE="generic" PACKAGES="$PKGS" FILES="files"
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-firmware
+          path: imagebuilder/bin/targets/x86/64/
