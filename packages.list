@@ -5,3 +5,6 @@ luci-i18n-package-manager-zh-cn
 nikki
 luci-app-nikki
 luci-i18n-nikki-zh-cn
+ddns-go
+luci-app-ddns-go
+luci-i18n-ddns-go-zh-cn
