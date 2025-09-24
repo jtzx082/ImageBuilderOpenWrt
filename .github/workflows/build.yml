@@ -22,9 +22,9 @@ jobs:
 
       - name: Download ImageBuilder
         run: |
-          wget https://downloads.immortalwrt.org/releases/24.10.2/targets/x86/64/immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
-          tar -I zstd -xf immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64.tar.zst
-          mv immortalwrt-imagebuilder-24.10.2-x86-64.Linux-x86_64 imagebuilder
+          wget https://downloads.immortalwrt.org/releases/24.10.3/targets/x86/64/immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64.tar.zst
+          tar -I zstd -xf immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64.tar.zst
+          mv immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64 imagebuilder
 
       - name: Prepare custom files
         run: |
