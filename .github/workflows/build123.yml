@@ -1,0 +1,65 @@
+name: Build ImmortalWrt Firmware
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build x86-64 Firmware
+    steps:
+
+    - name: Checkout workflow repo
+      uses: actions/checkout@v3
+
+    - name: Clone ImmortalWrt
+      run: |
+        git clone --depth=1 https://github.com/immortalwrt/immortalwrt openwrt
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Add custom packages from packages.list
+      run: |
+        cd openwrt
+        while read -r line; do
+          [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+          ./scripts/feeds install "$line"
+        done < ../packages.list
+
+    - name: Copy local IPK packages
+      run: |
+        mkdir -p openwrt/files/packages
+        cp packages/*.ipk openwrt/files/packages/
+
+    - name: Inject uci-custom script
+      run: |
+        mkdir -p openwrt/files/etc/uci-defaults
+        cp uci-custom openwrt/files/etc/uci-defaults/99-custom-settings
+        chmod +x openwrt/files/etc/uci-defaults/99-custom-settings
+
+    - name: Configure build
+      run: |
+        cd openwrt
+        make defconfig
+        sed -i 's/CONFIG_TARGET_x86=y/CONFIG_TARGET_x86=y\nCONFIG_TARGET_x86_64=y/' .config
+        make menuconfig # 可选：如需预设配置可替换为 echo 配置脚本
+
+    - name: Build firmware
+      run: |
+        cd openwrt
+        make -j$(nproc) download
+        make -j$(nproc)
+
+    - name: Upload firmware to Artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: firmware-x86-64
+        path: openwrt/bin/targets/x86/64/*
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: "x86-64-$(date +%Y%m%d-%H%M)"
+        name: "ImmortalWrt x86-64 Build $(date +%Y-%m-%d)"
+        files: openwrt/bin/targets/x86/64/*
