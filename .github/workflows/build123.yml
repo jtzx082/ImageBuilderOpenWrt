@@ -7,10 +7,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     name: Build x86-64 Firmware
-    steps:
 
+    steps:
     - name: Checkout workflow repo
       uses: actions/checkout@v3
+
+    - name: Set build timestamp
+      id: vars
+      run: echo "BUILD_TAG=x86-64-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
 
     - name: Clone ImmortalWrt
       run: |
@@ -22,15 +26,15 @@ jobs:
     - name: Add custom packages from packages.list
       run: |
         cd openwrt
-        while read -r line; do
-          [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
-          ./scripts/feeds install "$line"
+        while read -r pkg; do
+          [[ "$pkg" =~ ^#.*$ || -z "$pkg" ]] && continue
+          ./scripts/feeds install "$pkg"
         done < ../packages.list
 
     - name: Copy local IPK packages
       run: |
         mkdir -p openwrt/files/packages
-        cp packages/*.ipk openwrt/files/packages/
+        cp packages/*.ipk openwrt/files/packages/ || echo "No local IPKs found."
 
     - name: Inject uci-custom script
       run: |
@@ -42,24 +46,25 @@ jobs:
       run: |
         cd openwrt
         make defconfig
-        sed -i 's/CONFIG_TARGET_x86=y/CONFIG_TARGET_x86=y\nCONFIG_TARGET_x86_64=y/' .config
-        make menuconfig # 可选：如需预设配置可替换为 echo 配置脚本
+        echo -e "\nCONFIG_TARGET_x86=y\nCONFIG_TARGET_x86_64=y\nCONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
+        make defconfig
 
     - name: Build firmware
       run: |
         cd openwrt
         make -j$(nproc) download
-        make -j$(nproc)
+        make -j$(nproc) || make -j1 V=s
 
     - name: Upload firmware to Artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: firmware-x86-64
-        path: openwrt/bin/targets/x86/64/*
+        path: |
+          openwrt/bin/targets/x86/64/
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: "x86-64-$(date +%Y%m%d-%H%M)"
-        name: "ImmortalWrt x86-64 Build $(date +%Y-%m-%d)"
+        tag_name: ${{ env.BUILD_TAG }}
+        name: "ImmortalWrt x86-64 Build ${{ env.BUILD_TAG }}"
         files: openwrt/bin/targets/x86/64/*
