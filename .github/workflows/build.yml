@@ -2,7 +2,7 @@ name: Build ImmortalWrt Firmware
 
 on:
   workflow_dispatch:
-  push:
+  #push:
     branches:
       - main
 
