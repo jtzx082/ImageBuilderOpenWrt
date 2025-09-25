@@ -81,8 +81,6 @@ luci-i18n-nikki-zh-cn
 ddns-go
 luci-app-ddns-go
 luci-i18n-ddns-go-zh-cn
-luci-app-homeproxy
-luci-i18n-homeproxy-zh-cn
 vnstat2
 luci-app-vnstat2
 luci-i18n-vnstat2-zh-cn
