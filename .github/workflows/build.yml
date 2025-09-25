@@ -1,140 +1,66 @@
 name: Build ImmortalWrt Firmware
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+  #push:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set variables
-        id: vars
-        run: |
-          TARGET=x86
-          SUBTARGET=64
-          VERSION=24.10.3
-          IB_ARCH=Linux-x86_64
-          IB_NAME="immortalwrt-imagebuilder-${VERSION}-${TARGET}-${SUBTARGET}.${IB_ARCH}"
-          IB_TAR="${IB_NAME}.tar.zst"
-          ROOTFS_PARTSIZE=1024
-
-          {
-            echo "TARGET=${TARGET}"
-            echo "SUBTARGET=${SUBTARGET}"
-            echo "VERSION=${VERSION}"
-            echo "IB_ARCH=${IB_ARCH}"
-            echo "IB_NAME=${IB_NAME}"
-            echo "IB_TAR=${IB_TAR}"
-            echo "ROOTFS_PARTSIZE=${ROOTFS_PARTSIZE}"
-          } >> "$GITHUB_ENV"
-
-          {
-            echo "target=${TARGET}"
-            echo "subtarget=${SUBTARGET}"
-            echo "version=${VERSION}"
-            echo "ib_arch=${IB_ARCH}"
-            echo "ib_name=${IB_NAME}"
-            echo "ib_tar=${IB_TAR}"
-            echo "rootfs_partsize=${ROOTFS_PARTSIZE}"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential libncurses5-dev gawk git wget unzip file libssl-dev python3 zstd \
-            qemu-utils genisoimage grub-pc-bin
-
-      - name: Cache ImageBuilder archive
-        id: cache-ib
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/${{ steps.vars.outputs.ib_tar }}
-          key: ib-${{ steps.vars.outputs.version }}-${{ steps.vars.outputs.target }}-${{ steps.vars.outputs.subtarget }}
+          sudo apt-get install -y build-essential libncurses5-dev gawk git wget unzip \
+            file libssl-dev python3 zstd qemu-utils genisoimage grub2
 
       - name: Download ImageBuilder
-        if: steps.cache-ib.outputs.cache-hit != 'true'
         run: |
-          wget -O "${{ runner.temp }}/${{ steps.vars.outputs.ib_tar }}" \
-            "https://downloads.immortalwrt.org/releases/${{ steps.vars.outputs.version }}/targets/${{ steps.vars.outputs.target }}/${{ steps.vars.outputs.subtarget }}/${{ steps.vars.outputs.ib_tar }}"
-
-      - name: Extract ImageBuilder
-        run: |
-          tar -I zstd -xf "${{ runner.temp }}/${{ steps.vars.outputs.ib_tar }}"
-          mv "${{ steps.vars.outputs.ib_name }}" imagebuilder
+          wget https://downloads.immortalwrt.org/releases/24.10.3/targets/x86/64/immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64.tar.zst
+          tar -I zstd -xf immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64.tar.zst
+          mv immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64 imagebuilder
 
       - name: Prepare custom files
         run: |
           mkdir -p imagebuilder/files/etc/uci-defaults
-          install -m 0755 uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
+          cp uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
           mkdir -p imagebuilder/packages
           cp packages/*.ipk imagebuilder/packages/ || true
-
-      - name: Add Nikki feed to ImageBuilder repositories
-        working-directory: imagebuilder
-        run: |
-          FEED_URL="https://nikkinikki.pages.dev/openwrt-24.10/x86_64/nikki"
-          cp -a repositories.conf repositories.conf.bak
-          echo "src/gz nikki ${FEED_URL}" >> repositories.conf
-          echo "Appended Nikki feed to ImageBuilder repositories.conf:"
-          tail -n +1 repositories.conf
-
-      - name: Resolve package list (fix dnsmasq conflict)
-        id: pkgs
-        run: |
-          if [ -f packages.list ]; then
-            BASE_PKGS=$(tr '\n' ' ' < packages.list | xargs)
-          else
-            BASE_PKGS=""
-          fi
-
-          # Nikki packages
-          WANT_PKGS="nikki luci-app-nikki luci-i18n-nikki-zh-cn"
-
-          # Required deps
-          REQ_PKGS="firewall4 ca-bundle curl yq ip-full dnsmasq-full -dnsmasq"
-
-          MERGED="$(printf '%s %s %s\n' "$BASE_PKGS" "$WANT_PKGS" "$REQ_PKGS" | tr ' ' '\n' | awk 'NF' | sort -u | tr '\n' ' ')"
-          PKGS="$(echo "$MERGED" | xargs)"
-
-          echo "PKGS=${PKGS}" >> "$GITHUB_ENV"
-          echo "Packages to install: ${PKGS}"
 
       - name: Build firmware
         working-directory: imagebuilder
         run: |
+          PKGS=$(tr '\n' ' ' < ../packages.list)
           make image \
-            PACKAGES="${PKGS}" \
+            PACKAGES="$PKGS" \
             FILES="files" \
-            ROOTFS_PARTSIZE="${ROOTFS_PARTSIZE}"
+            ROOTFS_PARTSIZE=1024
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-firmware
-          path: imagebuilder/bin/targets/${{ steps.vars.outputs.target }}/${{ steps.vars.outputs.subtarget }}/*
-          if-no-files-found: error
-          retention-days: 14
+          path: imagebuilder/bin/targets/x86/64/*
 
       - name: Generate tag name
         id: tag
         run: |
           DATE=$(date +'%Y%m%d')
           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
-          TAG="auto-${DATE}-${SHORT_SHA}"
-          echo "TAG=${TAG}" >> "$GITHUB_ENV"
-          echo "Generated tag: ${TAG}"
+          echo "TAG=auto-${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
+          echo "Generated tag: auto-${DATE}-${SHORT_SHA}"
 
-      - name: Create release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
           name: "ImmortalWrt Firmware ${{ env.TAG }}"
           draft: false
           prerelease: false
-          files: imagebuilder/bin/targets/${{ steps.vars.outputs.target }}/${{ steps.vars.outputs.subtarget }}/*
+          files: imagebuilder/bin/targets/x86/64/*
