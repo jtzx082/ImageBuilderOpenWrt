@@ -70,11 +70,8 @@ jobs:
 
       - name: Prepare custom files
         run: |
-          # uci-defaults script
           mkdir -p imagebuilder/files/etc/uci-defaults
           install -m 0755 uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
-
-          # Optional local ipk repo
           mkdir -p imagebuilder/packages
           cp packages/*.ipk imagebuilder/packages/ || true
 
@@ -87,23 +84,21 @@ jobs:
           echo "Appended Nikki feed to ImageBuilder repositories.conf:"
           tail -n +1 repositories.conf
 
-      - name: Resolve package list and ensure required deps
+      - name: Resolve package list (fix dnsmasq conflict)
         id: pkgs
         run: |
-          # Base list from repository file (optional)
           if [ -f packages.list ]; then
             BASE_PKGS=$(tr '\n' ' ' < packages.list | xargs)
           else
             BASE_PKGS=""
           fi
 
-          # Nikki packages you want baked in (adjust as needed)
+          # Nikki packages
           WANT_PKGS="nikki luci-app-nikki luci-i18n-nikki-zh-cn"
 
-          # Known prerequisites to avoid dependency failures
-          REQ_PKGS="firewall4 ca-bundle curl yq ip-full"
+          # Required deps
+          REQ_PKGS="firewall4 ca-bundle curl yq ip-full dnsmasq-full -dnsmasq"
 
-          # Merge with dedup
           MERGED="$(printf '%s %s %s\n' "$BASE_PKGS" "$WANT_PKGS" "$REQ_PKGS" | tr ' ' '\n' | awk 'NF' | sort -u | tr '\n' ' ')"
           PKGS="$(echo "$MERGED" | xargs)"
 
