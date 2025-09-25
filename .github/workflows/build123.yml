@@ -9,31 +9,40 @@ jobs:
     timeout-minutes: 360
 
     steps:
+      # 1. Checkout 当前仓库（包含 packages.list 和 uci-custom）
+      - name: Checkout user repo
+        uses: actions/checkout@v4
+
+      # 2. Checkout ImmortalWrt 源码到子目录
       - name: Checkout ImmortalWrt source
         uses: actions/checkout@v4
         with:
           repository: immortalwrt/immortalwrt
-          ref: v24.10.3   # 固定版本，避免 master 变动
+          ref: v24.10.3
+          path: immortalwrt-src
 
       - name: Add Nikki feed
+        working-directory: immortalwrt-src
         run: |
           echo "src-git nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main" >> feeds.conf.default
           cat feeds.conf.default
 
       - name: Update & install feeds
+        working-directory: immortalwrt-src
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
       - name: Configure build
+        working-directory: immortalwrt-src
         run: |
           make defconfig
 
-          # 从 packages.list 读取插件
-          if [ -f ../packages.list ]; then
+          # 从用户仓库的 packages.list 读取插件
+          if [ -f $GITHUB_WORKSPACE/packages.list ]; then
             while read -r pkg; do
               [ -n "$pkg" ] && echo "CONFIG_PACKAGE_${pkg}=y" >> .config
-            done < ../packages.list
+            done < $GITHUB_WORKSPACE/packages.list
           fi
 
           # Nikki 包
@@ -51,23 +60,25 @@ jobs:
           make defconfig
 
       - name: Prepare custom files (uci-custom)
+        working-directory: immortalwrt-src
         run: |
           mkdir -p files/etc/uci-defaults
-          cp ../uci-custom files/etc/uci-defaults/99-custom-network
+          cp $GITHUB_WORKSPACE/uci-custom files/etc/uci-defaults/99-custom-network
           chmod 0755 files/etc/uci-defaults/99-custom-network
 
       - name: Cache build
         uses: actions/cache@v4
         with:
           path: |
-            dl
-            build_dir
-            staging_dir
+            immortalwrt-src/dl
+            immortalwrt-src/build_dir
+            immortalwrt-src/staging_dir
           key: ${{ runner.os }}-immortalwrt-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-immortalwrt-
 
       - name: Build firmware
+        working-directory: immortalwrt-src
         run: |
           make -j$(nproc) || make -j1 V=s
 
@@ -75,7 +86,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-nikki
-          path: bin/targets/**/*
+          path: immortalwrt-src/bin/targets/**/*
           if-no-files-found: error
           retention-days: 14
 
@@ -95,4 +106,4 @@ jobs:
           name: "ImmortalWrt Firmware ${{ env.TAG }}"
           draft: false
           prerelease: false
-          files: bin/targets/**/*   # 上传所有固件文件
+          files: immortalwrt-src/bin/targets/**/*
