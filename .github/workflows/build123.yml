@@ -1,4 +1,4 @@
-name: Build ImmortalWrt with Nikki
+name: Build ImmortalWrt with Nikki and Custom Packages
 
 on:
   workflow_dispatch: {}
@@ -27,16 +27,34 @@ jobs:
 
       - name: Configure build
         run: |
-          # 默认配置
           make defconfig
-          # 追加 Nikki 包
+
+          # 从 packages.list 读取插件
+          if [ -f ../packages.list ]; then
+            while read -r pkg; do
+              [ -n "$pkg" ] && echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+            done < ../packages.list
+          fi
+
+          # Nikki 包
           echo "CONFIG_PACKAGE_nikki=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config
-          # 确保 dnsmasq-full 替换 dnsmasq
+
+          # dnsmasq-full 替换 dnsmasq
           echo "CONFIG_PACKAGE_dnsmasq=n" >> .config
           echo "CONFIG_PACKAGE_dnsmasq-full=y" >> .config
+
+          # 设置 ROOTFS_PARTSIZE=1024 (1GB)
+          echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
+
           make defconfig
+
+      - name: Prepare custom files (uci-custom)
+        run: |
+          mkdir -p files/etc/uci-defaults
+          cp ../uci-custom files/etc/uci-defaults/99-custom-network
+          chmod 0755 files/etc/uci-defaults/99-custom-network
 
       - name: Cache build
         uses: actions/cache@v4
@@ -53,10 +71,28 @@ jobs:
         run: |
           make -j$(nproc) || make -j1 V=s
 
-      - name: Upload firmware
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-nikki
           path: bin/targets/**/*
           if-no-files-found: error
           retention-days: 14
+
+      - name: Generate tag name
+        id: tag
+        run: |
+          DATE=$(date +'%Y%m%d')
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          TAG="auto-${DATE}-${SHORT_SHA}"
+          echo "TAG=${TAG}" >> $GITHUB_ENV
+          echo "Generated tag: ${TAG}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: "ImmortalWrt Firmware ${{ env.TAG }}"
+          draft: false
+          prerelease: false
+          files: bin/targets/**/*   # 上传所有固件文件
