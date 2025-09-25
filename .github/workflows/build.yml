@@ -3,12 +3,20 @@ name: Build ImmortalWrt Firmware
 on:
   workflow_dispatch:
   #push:
-    branches:
-      - main
+  #  branches:
+  #    - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      TARGET: x86
+      SUBTARGET: 64
+      VERSION: 24.10.3
+      IB_ARCH: Linux-x86_64
+      IB_NAME: immortalwrt-imagebuilder-${{ env.VERSION }}-${{ env.TARGET }}-${{ env.SUBTARGET }}.${{ env.IB_ARCH }}
+      IB_TAR: ${{ env.IB_NAME }}.tar.zst
+      ROOTFS_PARTSIZE: 1024
 
     steps:
       - name: Checkout repository
@@ -17,36 +25,74 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk git wget unzip \
-            file libssl-dev python3 zstd qemu-utils genisoimage grub2
+          sudo apt-get install -y \
+            build-essential libncurses5-dev gawk git wget unzip file libssl-dev python3 zstd \
+            qemu-utils genisoimage grub2 busybox
+          # Ensure ash is available via busybox for feed script
+          busybox --list | grep -q '^ash$' || (echo "busybox ash missing" && exit 1)
+
+      - name: Cache ImageBuilder archive
+        id: cache-ib
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/${{ env.IB_TAR }}
+          key: ib-${{ env.VERSION }}-${{ env.TARGET }}-${{ env.SUBTARGET }}
 
       - name: Download ImageBuilder
+        if: steps.cache-ib.outputs.cache-hit != 'true'
         run: |
-          wget https://downloads.immortalwrt.org/releases/24.10.3/targets/x86/64/immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64.tar.zst
-          tar -I zstd -xf immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64.tar.zst
-          mv immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64 imagebuilder
+          wget -O "${{ runner.temp }}/${{ env.IB_TAR }}" \
+            "https://downloads.immortalwrt.org/releases/${{ env.VERSION }}/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/${{ env.IB_TAR }}"
+
+      - name: Extract ImageBuilder
+        run: |
+          tar -I zstd -xf "${{ runner.temp }}/${{ env.IB_TAR }}"
+          mv "${{ env.IB_NAME }}" imagebuilder
 
       - name: Prepare custom files
         run: |
           mkdir -p imagebuilder/files/etc/uci-defaults
-          cp uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
+          # Ensure uci-defaults script is executable and has a stable name
+          install -m 0755 uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
+          # Optional local ipk repo
           mkdir -p imagebuilder/packages
           cp packages/*.ipk imagebuilder/packages/ || true
+
+      - name: Add feed (nikki)
+        working-directory: imagebuilder
+        run: |
+          # Run provided feed script with busybox ash for reproducibility
+          wget -O - "https://github.com/nikkinikki-org/OpenWrt-nikki/raw/refs/heads/main/feed.sh" | busybox ash
+          # Tip: if you want to pin to a specific commit, replace refs/heads/main with /<commit-sha>/ to avoid breaking changes.
+
+      - name: Resolve package list
+        id: pkgs
+        run: |
+          if [ -f packages.list ]; then
+            # Collapse newline-separated packages into space-separated list
+            PKGS=$(tr '\n' ' ' < packages.list | xargs)
+          else
+            PKGS=""
+          fi
+          echo "PKGS=${PKGS}" >> $GITHUB_ENV
+          echo "Packages: ${PKGS}"
 
       - name: Build firmware
         working-directory: imagebuilder
         run: |
-          PKGS=$(tr '\n' ' ' < ../packages.list)
+          # If you added a feed that introduces new packages, ensure they’re referenced in $PKGS
           make image \
-            PACKAGES="$PKGS" \
+            PACKAGES="${PKGS}" \
             FILES="files" \
-            ROOTFS_PARTSIZE=1024
+            ROOTFS_PARTSIZE=${ROOTFS_PARTSIZE}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-firmware
-          path: imagebuilder/bin/targets/x86/64/*
+          path: imagebuilder/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Generate tag name
         id: tag
@@ -54,13 +100,13 @@ jobs:
           DATE=$(date +'%Y%m%d')
           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
           echo "TAG=auto-${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
-          echo "Generated tag: auto-${DATE}-${SHORT_SHA}"
+          echo "Generated tag: ${TAG}"
 
-      - name: Create Release
+      - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
           name: "ImmortalWrt Firmware ${{ env.TAG }}"
           draft: false
           prerelease: false
-          files: imagebuilder/bin/targets/x86/64/*
+          files: imagebuilder/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*
