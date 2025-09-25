@@ -1,20 +1,18 @@
 name: Build ImmortalWrt Firmware
 
 on:
-  workflow_dispatch:
-  #push:
-  #  branches:
-  #    - main
+  workflow_dispatch: {}
 
- [A](https://github.com/nikkinikki-org/OpenWrt-nikki/issues/515?copilot_analytics_metadata=eyJldmVudEluZm9fY29udmVyc2F0aW9uSWQiOiJNUUxTelBhbml1aEhranFtcmJFWGUiLCJldmVudEluZm9fY2xpY2tTb3VyY2UiOiJjaXRhdGlvbkxpbmsiLCJldmVudEluZm9fbWVzc2FnZUlkIjoiNzJBdnFKUXVtNzNnOGZpVEU3QkpSIiwiZXZlbnRJbmZvX2NsaWNrRGVzdGluYXRpb24iOiJodHRwczpcL1wvZ2l0aHViLmNvbVwvbmlra2luaWtraS1vcmdcL09wZW5XcnQtbmlra2lcL2lzc3Vlc1wvNTE1In0%3D&citationMarker=9F742443-6C92-4C44-BF58-8F5A7C53B6F1) [B](https://blog.hellowood.dev/posts/openwrt-%E5%AE%89%E8%A3%85%E4%BD%BF%E7%94%A8-openclash-%E7%9A%84%E5%B9%B3%E6%9B%BF%E8%BD%AF%E4%BB%B6-openwrt-nikki/?copilot_analytics_metadata=eyJldmVudEluZm9fY29udmVyc2F0aW9uSWQiOiJNUUxTelBhbml1aEhranFtcmJFWGUiLCJldmVudEluZm9fbWVzc2FnZUlkIjoiNzJBdnFKUXVtNzNnOGZpVEU3QkpSIiwiZXZlbnRJbmZvX2NsaWNrRGVzdGluYXRpb24iOiJodHRwczpcL1wvYmxvZy5oZWxsb3dvb2QuZGV2XC9wb3N0c1wvb3BlbndydC0lRTUlQUUlODklRTglQTMlODUlRTQlQkQlQkYlRTclOTQlQTgtb3BlbmNsYXNoLSVFNyU5QSU4NCVFNSVCOSVCMyVFNiU5QiVCRiVFOCVCRCVBRiVFNCVCQiVCNi1vcGVud3J0LW5pa2tpXC8iLCJldmVudEluZm9fY2xpY2tTb3VyY2UiOiJjaXRhdGlvbkxpbmsifQ%3D%3D&citationMarker=9F742443-6C92-4C44-BF58-8F5A7C53B6F1)jobs:
+jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set variables (env + outputs)
+      - name: Set variables
         id: vars
         run: |
           TARGET=x86
@@ -26,6 +24,7 @@ on:
           ROOTFS_PARTSIZE=1024
           ARCH_PKG="x86_64"  # opkg arch string for x86/64
 
+          # Export for subsequent shell steps
           {
             echo "TARGET=${TARGET}"
             echo "SUBTARGET=${SUBTARGET}"
@@ -37,6 +36,7 @@ on:
             echo "ARCH_PKG=${ARCH_PKG}"
           } >> "$GITHUB_ENV"
 
+          # Also expose as step outputs for use in expressions (cache keys, paths)
           {
             echo "target=${TARGET}"
             echo "subtarget=${SUBTARGET}"
@@ -53,7 +53,7 @@ on:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential libncurses5-dev gawk git wget unzip file libssl-dev python3 zstd \
-            qemu-utils genisoimage grub2
+            qemu-utils genisoimage grub-pc-bin
 
       - name: Cache ImageBuilder archive
         id: cache-ib
@@ -73,23 +73,23 @@ on:
           tar -I zstd -xf "${{ runner.temp }}/${{ steps.vars.outputs.ib_tar }}"
           mv "${{ steps.vars.outputs.ib_name }}" imagebuilder
 
-      - name: Prepare custom files
+      - name: Prepare custom files and Nikki feed
         run: |
           # uci-defaults script
           mkdir -p imagebuilder/files/etc/uci-defaults
           install -m 0755 uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
 
-          # Local ipk repo (optional)
+          # Optional local ipk repo
           mkdir -p imagebuilder/packages
           cp packages/*.ipk imagebuilder/packages/ || true
 
-          # Add Nikki feed for runtime opkg on the built image (do not run feed.sh)
+          # Add Nikki feed to opkg config (do not execute feed.sh during build)
           mkdir -p imagebuilder/files/etc/opkg
           cat > imagebuilder/files/etc/opkg/customfeeds.conf <<'EOF'
           src/gz nikki https://nikkinikki.pages.dev/openwrt-24.10/x86_64/nikki
           EOF
 
-      - name: Resolve package list (append firewall4)
+      - name: Resolve package list and ensure firewall4
         id: pkgs
         run: |
           if [ -f packages.list ]; then
@@ -97,8 +97,7 @@ on:
           else
             BASE_PKGS=""
           fi
-          # Ensure firewall4 is present to satisfy Nikki's requirement
-          # Avoid duplicate insertion
+          # Ensure firewall4 is present (Nikki requires firewall4)
           case " $BASE_PKGS " in
             *" firewall4 "*) PKGS="$BASE_PKGS" ;;
             *) PKGS="$BASE_PKGS firewall4" ;;
@@ -112,7 +111,7 @@ on:
           make image \
             PACKAGES="${PKGS}" \
             FILES="files" \
-            ROOTFS_PARTSIZE=${ROOTFS_PARTSIZE}
+            ROOTFS_PARTSIZE="${ROOTFS_PARTSIZE}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
