@@ -22,9 +22,7 @@ jobs:
           IB_NAME="immortalwrt-imagebuilder-${VERSION}-${TARGET}-${SUBTARGET}.${IB_ARCH}"
           IB_TAR="${IB_NAME}.tar.zst"
           ROOTFS_PARTSIZE=1024
-          ARCH_PKG="x86_64"  # opkg arch string for x86/64
 
-          # Export for subsequent shell steps
           {
             echo "TARGET=${TARGET}"
             echo "SUBTARGET=${SUBTARGET}"
@@ -33,10 +31,8 @@ jobs:
             echo "IB_NAME=${IB_NAME}"
             echo "IB_TAR=${IB_TAR}"
             echo "ROOTFS_PARTSIZE=${ROOTFS_PARTSIZE}"
-            echo "ARCH_PKG=${ARCH_PKG}"
           } >> "$GITHUB_ENV"
 
-          # Also expose as step outputs for use in expressions (cache keys, paths)
           {
             echo "target=${TARGET}"
             echo "subtarget=${SUBTARGET}"
@@ -45,7 +41,6 @@ jobs:
             echo "ib_name=${IB_NAME}"
             echo "ib_tar=${IB_TAR}"
             echo "rootfs_partsize=${ROOTFS_PARTSIZE}"
-            echo "arch_pkg=${ARCH_PKG}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
@@ -73,7 +68,7 @@ jobs:
           tar -I zstd -xf "${{ runner.temp }}/${{ steps.vars.outputs.ib_tar }}"
           mv "${{ steps.vars.outputs.ib_name }}" imagebuilder
 
-      - name: Prepare custom files and Nikki feed
+      - name: Prepare custom files
         run: |
           # uci-defaults script
           mkdir -p imagebuilder/files/etc/uci-defaults
@@ -83,27 +78,37 @@ jobs:
           mkdir -p imagebuilder/packages
           cp packages/*.ipk imagebuilder/packages/ || true
 
-          # Add Nikki feed to opkg config (do not execute feed.sh during build)
-          mkdir -p imagebuilder/files/etc/opkg
-          cat > imagebuilder/files/etc/opkg/customfeeds.conf <<'EOF'
-          src/gz nikki https://nikkinikki.pages.dev/openwrt-24.10/x86_64/nikki
-          EOF
+      - name: Add Nikki feed to ImageBuilder repositories
+        working-directory: imagebuilder
+        run: |
+          FEED_URL="https://nikkinikki.pages.dev/openwrt-24.10/x86_64/nikki"
+          cp -a repositories.conf repositories.conf.bak
+          echo "src/gz nikki ${FEED_URL}" >> repositories.conf
+          echo "Appended Nikki feed to ImageBuilder repositories.conf:"
+          tail -n +1 repositories.conf
 
-      - name: Resolve package list and ensure firewall4
+      - name: Resolve package list and ensure required deps
         id: pkgs
         run: |
+          # Base list from repository file (optional)
           if [ -f packages.list ]; then
             BASE_PKGS=$(tr '\n' ' ' < packages.list | xargs)
           else
             BASE_PKGS=""
           fi
-          # Ensure firewall4 is present (Nikki requires firewall4)
-          case " $BASE_PKGS " in
-            *" firewall4 "*) PKGS="$BASE_PKGS" ;;
-            *) PKGS="$BASE_PKGS firewall4" ;;
-          esac
+
+          # Nikki packages you want baked in (adjust as needed)
+          WANT_PKGS="nikki luci-app-nikki luci-i18n-nikki-zh-cn"
+
+          # Known prerequisites to avoid dependency failures
+          REQ_PKGS="firewall4 ca-bundle curl yq ip-full"
+
+          # Merge with dedup
+          MERGED="$(printf '%s %s %s\n' "$BASE_PKGS" "$WANT_PKGS" "$REQ_PKGS" | tr ' ' '\n' | awk 'NF' | sort -u | tr '\n' ' ')"
+          PKGS="$(echo "$MERGED" | xargs)"
+
           echo "PKGS=${PKGS}" >> "$GITHUB_ENV"
-          echo "Packages: ${PKGS}"
+          echo "Packages to install: ${PKGS}"
 
       - name: Build firmware
         working-directory: imagebuilder
