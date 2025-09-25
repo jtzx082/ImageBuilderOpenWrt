@@ -6,7 +6,7 @@ on:
   #  branches:
   #    - main
 
-jobs:
+ [A](https://github.com/nikkinikki-org/OpenWrt-nikki/issues/515?copilot_analytics_metadata=eyJldmVudEluZm9fY29udmVyc2F0aW9uSWQiOiJNUUxTelBhbml1aEhranFtcmJFWGUiLCJldmVudEluZm9fY2xpY2tTb3VyY2UiOiJjaXRhdGlvbkxpbmsiLCJldmVudEluZm9fbWVzc2FnZUlkIjoiNzJBdnFKUXVtNzNnOGZpVEU3QkpSIiwiZXZlbnRJbmZvX2NsaWNrRGVzdGluYXRpb24iOiJodHRwczpcL1wvZ2l0aHViLmNvbVwvbmlra2luaWtraS1vcmdcL09wZW5XcnQtbmlra2lcL2lzc3Vlc1wvNTE1In0%3D&citationMarker=9F742443-6C92-4C44-BF58-8F5A7C53B6F1) [B](https://blog.hellowood.dev/posts/openwrt-%E5%AE%89%E8%A3%85%E4%BD%BF%E7%94%A8-openclash-%E7%9A%84%E5%B9%B3%E6%9B%BF%E8%BD%AF%E4%BB%B6-openwrt-nikki/?copilot_analytics_metadata=eyJldmVudEluZm9fY29udmVyc2F0aW9uSWQiOiJNUUxTelBhbml1aEhranFtcmJFWGUiLCJldmVudEluZm9fbWVzc2FnZUlkIjoiNzJBdnFKUXVtNzNnOGZpVEU3QkpSIiwiZXZlbnRJbmZvX2NsaWNrRGVzdGluYXRpb24iOiJodHRwczpcL1wvYmxvZy5oZWxsb3dvb2QuZGV2XC9wb3N0c1wvb3BlbndydC0lRTUlQUUlODklRTglQTMlODUlRTQlQkQlQkYlRTclOTQlQTgtb3BlbmNsYXNoLSVFNyU5QSU4NCVFNSVCOSVCMyVFNiU5QiVCRiVFOCVCRCVBRiVFNCVCQiVCNi1vcGVud3J0LW5pa2tpXC8iLCJldmVudEluZm9fY2xpY2tTb3VyY2UiOiJjaXRhdGlvbkxpbmsifQ%3D%3D&citationMarker=9F742443-6C92-4C44-BF58-8F5A7C53B6F1)jobs:
   build:
     runs-on: ubuntu-latest
 
@@ -14,7 +14,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set variables
+      - name: Set variables (env + outputs)
+        id: vars
         run: |
           TARGET=x86
           SUBTARGET=64
@@ -23,6 +24,8 @@ jobs:
           IB_NAME="immortalwrt-imagebuilder-${VERSION}-${TARGET}-${SUBTARGET}.${IB_ARCH}"
           IB_TAR="${IB_NAME}.tar.zst"
           ROOTFS_PARTSIZE=1024
+          ARCH_PKG="x86_64"  # opkg arch string for x86/64
+
           {
             echo "TARGET=${TARGET}"
             echo "SUBTARGET=${SUBTARGET}"
@@ -31,56 +34,76 @@ jobs:
             echo "IB_NAME=${IB_NAME}"
             echo "IB_TAR=${IB_TAR}"
             echo "ROOTFS_PARTSIZE=${ROOTFS_PARTSIZE}"
-          } >> $GITHUB_ENV
+            echo "ARCH_PKG=${ARCH_PKG}"
+          } >> "$GITHUB_ENV"
+
+          {
+            echo "target=${TARGET}"
+            echo "subtarget=${SUBTARGET}"
+            echo "version=${VERSION}"
+            echo "ib_arch=${IB_ARCH}"
+            echo "ib_name=${IB_NAME}"
+            echo "ib_tar=${IB_TAR}"
+            echo "rootfs_partsize=${ROOTFS_PARTSIZE}"
+            echo "arch_pkg=${ARCH_PKG}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential libncurses5-dev gawk git wget unzip file libssl-dev python3 zstd \
-            qemu-utils genisoimage grub2 busybox
-          busybox --list | grep -q '^ash$' || (echo "busybox ash missing" && exit 1)
+            qemu-utils genisoimage grub2
 
       - name: Cache ImageBuilder archive
         id: cache-ib
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/${{ env.IB_TAR }}
-          key: ib-${{ env.VERSION }}-${{ env.TARGET }}-${{ env.SUBTARGET }}
+          path: ${{ runner.temp }}/${{ steps.vars.outputs.ib_tar }}
+          key: ib-${{ steps.vars.outputs.version }}-${{ steps.vars.outputs.target }}-${{ steps.vars.outputs.subtarget }}
 
       - name: Download ImageBuilder
         if: steps.cache-ib.outputs.cache-hit != 'true'
         run: |
-          wget -O "${{ runner.temp }}/${{ env.IB_TAR }}" \
-            "https://downloads.immortalwrt.org/releases/${{ env.VERSION }}/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/${{ env.IB_TAR }}"
+          wget -O "${{ runner.temp }}/${{ steps.vars.outputs.ib_tar }}" \
+            "https://downloads.immortalwrt.org/releases/${{ steps.vars.outputs.version }}/targets/${{ steps.vars.outputs.target }}/${{ steps.vars.outputs.subtarget }}/${{ steps.vars.outputs.ib_tar }}"
 
       - name: Extract ImageBuilder
         run: |
-          tar -I zstd -xf "${{ runner.temp }}/${{ env.IB_TAR }}"
-          mv "${{ env.IB_NAME }}" imagebuilder
+          tar -I zstd -xf "${{ runner.temp }}/${{ steps.vars.outputs.ib_tar }}"
+          mv "${{ steps.vars.outputs.ib_name }}" imagebuilder
 
       - name: Prepare custom files
         run: |
+          # uci-defaults script
           mkdir -p imagebuilder/files/etc/uci-defaults
           install -m 0755 uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
+
+          # Local ipk repo (optional)
           mkdir -p imagebuilder/packages
           cp packages/*.ipk imagebuilder/packages/ || true
 
-      - name: Add feed (nikki)
-        working-directory: imagebuilder
-        run: |
-          wget -O - "https://github.com/nikkinikki-org/OpenWrt-nikki/raw/refs/heads/main/feed.sh" | busybox ash
-          # To pin to a specific commit for reproducibility, replace refs/heads/main with the commit SHA.
+          # Add Nikki feed for runtime opkg on the built image (do not run feed.sh)
+          mkdir -p imagebuilder/files/etc/opkg
+          cat > imagebuilder/files/etc/opkg/customfeeds.conf <<'EOF'
+          src/gz nikki https://nikkinikki.pages.dev/openwrt-24.10/x86_64/nikki
+          EOF
 
-      - name: Resolve package list
+      - name: Resolve package list (append firewall4)
         id: pkgs
         run: |
           if [ -f packages.list ]; then
-            PKGS=$(tr '\n' ' ' < packages.list | xargs)
+            BASE_PKGS=$(tr '\n' ' ' < packages.list | xargs)
           else
-            PKGS=""
+            BASE_PKGS=""
           fi
-          echo "PKGS=${PKGS}" >> $GITHUB_ENV
+          # Ensure firewall4 is present to satisfy Nikki's requirement
+          # Avoid duplicate insertion
+          case " $BASE_PKGS " in
+            *" firewall4 "*) PKGS="$BASE_PKGS" ;;
+            *) PKGS="$BASE_PKGS firewall4" ;;
+          esac
+          echo "PKGS=${PKGS}" >> "$GITHUB_ENV"
           echo "Packages: ${PKGS}"
 
       - name: Build firmware
@@ -89,13 +112,13 @@ jobs:
           make image \
             PACKAGES="${PKGS}" \
             FILES="files" \
-            ROOTFS_PARTSIZE=${{ env.ROOTFS_PARTSIZE }}
+            ROOTFS_PARTSIZE=${ROOTFS_PARTSIZE}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-firmware
-          path: imagebuilder/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*
+          path: imagebuilder/bin/targets/${{ steps.vars.outputs.target }}/${{ steps.vars.outputs.subtarget }}/*
           if-no-files-found: error
           retention-days: 14
 
@@ -104,8 +127,9 @@ jobs:
         run: |
           DATE=$(date +'%Y%m%d')
           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
-          echo "TAG=auto-${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
-          echo "Generated tag: auto-${DATE}-${SHORT_SHA}"
+          TAG="auto-${DATE}-${SHORT_SHA}"
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+          echo "Generated tag: ${TAG}"
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -114,4 +138,4 @@ jobs:
           name: "ImmortalWrt Firmware ${{ env.TAG }}"
           draft: false
           prerelease: false
-          files: imagebuilder/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*
+          files: imagebuilder/bin/targets/${{ steps.vars.outputs.target }}/${{ steps.vars.outputs.subtarget }}/*
