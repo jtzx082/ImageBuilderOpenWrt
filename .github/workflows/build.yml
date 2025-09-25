@@ -9,18 +9,29 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      TARGET: x86
-      SUBTARGET: 64
-      VERSION: 24.10.3
-      IB_ARCH: Linux-x86_64
-      IB_NAME: immortalwrt-imagebuilder-${{ env.VERSION }}-${{ env.TARGET }}-${{ env.SUBTARGET }}.${{ env.IB_ARCH }}
-      IB_TAR: ${{ env.IB_NAME }}.tar.zst
-      ROOTFS_PARTSIZE: 1024
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set variables
+        run: |
+          TARGET=x86
+          SUBTARGET=64
+          VERSION=24.10.3
+          IB_ARCH=Linux-x86_64
+          IB_NAME="immortalwrt-imagebuilder-${VERSION}-${TARGET}-${SUBTARGET}.${IB_ARCH}"
+          IB_TAR="${IB_NAME}.tar.zst"
+          ROOTFS_PARTSIZE=1024
+          {
+            echo "TARGET=${TARGET}"
+            echo "SUBTARGET=${SUBTARGET}"
+            echo "VERSION=${VERSION}"
+            echo "IB_ARCH=${IB_ARCH}"
+            echo "IB_NAME=${IB_NAME}"
+            echo "IB_TAR=${IB_TAR}"
+            echo "ROOTFS_PARTSIZE=${ROOTFS_PARTSIZE}"
+          } >> $GITHUB_ENV
 
       - name: Install dependencies
         run: |
@@ -28,7 +39,6 @@ jobs:
           sudo apt-get install -y \
             build-essential libncurses5-dev gawk git wget unzip file libssl-dev python3 zstd \
             qemu-utils genisoimage grub2 busybox
-          # Ensure ash is available via busybox for feed script
           busybox --list | grep -q '^ash$' || (echo "busybox ash missing" && exit 1)
 
       - name: Cache ImageBuilder archive
@@ -52,24 +62,20 @@ jobs:
       - name: Prepare custom files
         run: |
           mkdir -p imagebuilder/files/etc/uci-defaults
-          # Ensure uci-defaults script is executable and has a stable name
           install -m 0755 uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
-          # Optional local ipk repo
           mkdir -p imagebuilder/packages
           cp packages/*.ipk imagebuilder/packages/ || true
 
       - name: Add feed (nikki)
         working-directory: imagebuilder
         run: |
-          # Run provided feed script with busybox ash for reproducibility
           wget -O - "https://github.com/nikkinikki-org/OpenWrt-nikki/raw/refs/heads/main/feed.sh" | busybox ash
-          # Tip: if you want to pin to a specific commit, replace refs/heads/main with /<commit-sha>/ to avoid breaking changes.
+          # To pin to a specific commit for reproducibility, replace refs/heads/main with the commit SHA.
 
       - name: Resolve package list
         id: pkgs
         run: |
           if [ -f packages.list ]; then
-            # Collapse newline-separated packages into space-separated list
             PKGS=$(tr '\n' ' ' < packages.list | xargs)
           else
             PKGS=""
@@ -80,11 +86,10 @@ jobs:
       - name: Build firmware
         working-directory: imagebuilder
         run: |
-          # If you added a feed that introduces new packages, ensure they’re referenced in $PKGS
           make image \
             PACKAGES="${PKGS}" \
             FILES="files" \
-            ROOTFS_PARTSIZE=${ROOTFS_PARTSIZE}
+            ROOTFS_PARTSIZE=${{ env.ROOTFS_PARTSIZE }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -100,7 +105,7 @@ jobs:
           DATE=$(date +'%Y%m%d')
           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
           echo "TAG=auto-${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
-          echo "Generated tag: ${TAG}"
+          echo "Generated tag: auto-${DATE}-${SHORT_SHA}"
 
       - name: Create release
         uses: softprops/action-gh-release@v2
