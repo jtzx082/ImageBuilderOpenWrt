@@ -115,15 +115,29 @@ jobs:
           echo "TAG=${TAG}" >> $GITHUB_ENV
           echo "Generated tag: ${TAG}"
 
-      # 🔥 新增：清理同名 Release assets（避免 already_exists）
+      # 先创建一个空的 Release（避免找不到 tag）
+      - name: Create empty GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: "ImmortalWrt Firmware ${{ env.TAG }}"
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 清理已有资产（如果有）
       - name: Delete existing release assets
         uses: mknejp/delete-release-assets@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ env.TAG }}
           assets: "*"
+          fail-if-no-release: false
+          fail-if-no-assets: false
 
-      - name: Create GitHub Release
+      # 重新上传文件，允许覆盖
+      - name: Upload firmware to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
@@ -131,7 +145,7 @@ jobs:
           draft: false
           prerelease: false
           files: immortalwrt-src/bin/targets/**/*
-          overwrite: true   # ✅ 双保险：允许覆盖已有文件
+          overwrite: true
 
       # 保留最近 3 个 Release
       - name: Delete old releases
