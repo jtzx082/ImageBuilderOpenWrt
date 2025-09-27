@@ -145,7 +145,7 @@ jobs:
           draft: false
           prerelease: false
           files: immortalwrt-src/bin/targets/**/*
-          overwrite: true
+          overwrite_files: true   # ✅ 正确参数，替代 overwrite
 
       # 保留最近 3 个 Release
       - name: Delete old releases
