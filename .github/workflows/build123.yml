@@ -102,7 +102,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-nikki
-          path: immortalwrt-src/bin/targets/**/*
+          path: immortalwrt-src/bin/targets/x86/64/*
           if-no-files-found: error
           retention-days: 14
 
@@ -144,7 +144,7 @@ jobs:
           name: "ImmortalWrt Firmware ${{ env.TAG }}"
           draft: false
           prerelease: false
-          files: immortalwrt-src/bin/targets/**/*
+          files: immortalwrt-src/bin/targets/x86/64/*
           overwrite_files: true   # ✅ 正确参数，替代 overwrite
 
       # 保留最近 3 个 Release
