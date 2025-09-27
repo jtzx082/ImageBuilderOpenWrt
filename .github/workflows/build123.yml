@@ -27,11 +27,11 @@ jobs:
           path: immortalwrt-src
 
       # 3. 更新源码
-      - name: Update ImmortalWrt source
-        working-directory: immortalwrt-src
-        run: |
-          git fetch --all
-          git pull --ff-only || true
+     # - name: Update ImmortalWrt source
+     #   working-directory: immortalwrt-src
+     #   run: |
+     #     git fetch --all
+     #     git pull --ff-only || true
 
       # 4. 释放磁盘空间
       - name: Free disk space
