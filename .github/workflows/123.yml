@@ -35,12 +35,10 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
           df -h
 
-      # 添加 feeds：luci + packages + nikki
-      - name: Add extra feeds
+      # 只添加 Nikki feed，避免重复 luci
+      - name: Add Nikki feed
         working-directory: immortalwrt-src
         run: |
-          echo "src-git luci https://github.com/openwrt/luci.git;openwrt-24.10" >> feeds.conf.default
-          echo "src-git packages https://github.com/openwrt/packages.git;openwrt-24.10" >> feeds.conf.default
           echo "src-git nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main" >> feeds.conf.default
           cat feeds.conf.default
 
@@ -74,7 +72,7 @@ jobs:
           # 设置 ROOTFS_PARTSIZE=1024 (1GB)
           echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
 
-          # 禁用缺失依赖的包（避免编译失败）
+          # 禁用可能缺失依赖的包（避免编译失败）
           echo "CONFIG_PACKAGE_autocore=n" >> .config
           echo "CONFIG_PACKAGE_autosamba=n" >> .config
           echo "CONFIG_PACKAGE_default-settings=n" >> .config
