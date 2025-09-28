@@ -1,4 +1,4 @@
-name: Build_ImmortalWrt with Nikki and Custom Packages
+name: Build ImmortalWrt with Nikki and Custom Packages
 
 on:
   workflow_dispatch: {}
@@ -92,7 +92,6 @@ jobs:
           echo "TAG=${TAG}" >> $GITHUB_ENV
           echo "Generated tag: ${TAG}"
 
-      # 直接上传并创建/更新 Release
       - name: Upload firmware to Release
         uses: softprops/action-gh-release@v2
         with:
@@ -101,7 +100,7 @@ jobs:
           draft: false
           prerelease: false
           files: immortalwrt-src/bin/targets/x86/64/*
-          update_existing: true   # ✅ 避免重复创建报错
+          overwrite_files: true   # ✅ 正确参数，允许覆盖已有文件
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
