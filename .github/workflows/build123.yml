@@ -2,8 +2,8 @@ name: Build ImmortalWrt with Nikki and Custom Packages
 
 on:
   workflow_dispatch: {}
-  #schedule:
-  #  - cron: "0 19 * * *"   # 每天 UTC 19 点触发，相当于北京时间次日凌晨 3 点
+  schedule:
+    - cron: "0 19 * * *"
 
 jobs:
   build:
@@ -30,7 +30,6 @@ jobs:
         working-directory: immortalwrt-src
         run: |
           echo "src-git nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main" >> feeds.conf.default
-          cat feeds.conf.default
 
       - name: Update & install feeds
         working-directory: immortalwrt-src
@@ -38,32 +37,37 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Configure build
+      - name: Apply clean config
         working-directory: immortalwrt-src
         run: |
-          make defconfig
+          cp $GITHUB_WORKSPACE/clean.config .config
+
+          # ✅ 追加 packages.list 中的插件
           if [ -f $GITHUB_WORKSPACE/packages.list ]; then
             while read -r pkg; do
               [ -n "$pkg" ] && echo "CONFIG_PACKAGE_${pkg}=y" >> .config
             done < $GITHUB_WORKSPACE/packages.list
           fi
-          echo "CONFIG_PACKAGE_nikki=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
-          echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config
-          echo "CONFIG_PACKAGE_dnsmasq=n" >> .config
-          echo "CONFIG_PACKAGE_dnsmasq-full=y" >> .config
-          echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
-          make defconfig
+
+          make oldconfig
+
+      - name: Verify iptables fully disabled
+        working-directory: immortalwrt-src
+        run: |
+          echo "🔍 检查是否残留 iptables 配置..."
+          if grep -E "CONFIG_PACKAGE_(iptables|fw3|kmod-ipt)-.*=y" .config; then
+            echo "❌ 检测到残留 iptables 配置，请检查 clean.config 或 packages.list 是否引入依赖！"
+            exit 1
+          fi
+          echo "✅ iptables 已完全禁用，使用纯 nftables 防火墙"
 
       - name: Prepare custom files (uci-custom + nikki)
         working-directory: immortalwrt-src
         run: |
-          # uci-custom 脚本
           mkdir -p files/etc/uci-defaults
           cp $GITHUB_WORKSPACE/uci-custom files/etc/uci-defaults/99-custom-network
           chmod 0755 files/etc/uci-defaults/99-custom-network
 
-          # ✅ 替换 /etc/config/nikki
           mkdir -p files/etc/config
           cp $GITHUB_WORKSPACE/nikki files/etc/config/nikki
           chmod 0777 files/etc/config/nikki
@@ -96,7 +100,6 @@ jobs:
           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
           TAG="auto-${DATE}-${SHORT_SHA}"
           echo "TAG=${TAG}" >> $GITHUB_ENV
-          echo "Generated tag: ${TAG}"
 
       - name: Upload firmware to Release
         uses: softprops/action-gh-release@v2
@@ -106,7 +109,7 @@ jobs:
           draft: false
           prerelease: false
           files: immortalwrt-src/bin/targets/x86/64/*
-          overwrite_files: true   # ✅ 覆盖已有文件
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
