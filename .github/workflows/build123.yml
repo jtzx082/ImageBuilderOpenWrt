@@ -2,8 +2,8 @@ name: Build ImmortalWrt with Nikki and Custom Packages
 
 on:
   workflow_dispatch: {}
-  schedule:
-    - cron: "0 19 * * *"
+  #schedule:
+  #  - cron: "0 19 * * *"
 
 jobs:
   build:
