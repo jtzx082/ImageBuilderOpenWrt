@@ -2,11 +2,8 @@ name: Build ImmortalWrt with Nikki and Custom Packages
 
 on:
   workflow_dispatch: {}
-  #push:
-  #  branches:
-  #    - main
- # schedule:
- #   - cron: "0 19 * * *"   # 每天 UTC 19 点触发，相当于北京时间次日凌晨 3 点
+  schedule:
+    - cron: "0 19 * * *"   # 每天 UTC 19 点触发，相当于北京时间次日凌晨 3 点
 
 jobs:
   build:
@@ -14,11 +11,9 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      # 1. Checkout 当前仓库（包含 packages.list 和 uci-custom）
       - name: Checkout user repo
         uses: actions/checkout@v4
 
-      # 2. Checkout ImmortalWrt 源码到子目录
       - name: Checkout ImmortalWrt source
         uses: actions/checkout@v4
         with:
@@ -26,14 +21,6 @@ jobs:
           ref: v24.10.3
           path: immortalwrt-src
 
-      # 3. 更新源码
-     # - name: Update ImmortalWrt source
-     #   working-directory: immortalwrt-src
-     #   run: |
-     #     git fetch --all
-     #     git pull --ff-only || true
-
-      # 4. 释放磁盘空间
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
@@ -55,36 +42,32 @@ jobs:
         working-directory: immortalwrt-src
         run: |
           make defconfig
-
-          # 从用户仓库的 packages.list 读取插件
           if [ -f $GITHUB_WORKSPACE/packages.list ]; then
             while read -r pkg; do
               [ -n "$pkg" ] && echo "CONFIG_PACKAGE_${pkg}=y" >> .config
             done < $GITHUB_WORKSPACE/packages.list
           fi
-
-          # Nikki 包
           echo "CONFIG_PACKAGE_nikki=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config
-
-          # dnsmasq-full 替换 dnsmasq
           echo "CONFIG_PACKAGE_dnsmasq=n" >> .config
           echo "CONFIG_PACKAGE_dnsmasq-full=y" >> .config
-
-          # 设置 ROOTFS_PARTSIZE=1024 (1GB)
           echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
-
           make defconfig
 
-      - name: Prepare custom files (uci-custom)
+      - name: Prepare custom files (uci-custom + nikki)
         working-directory: immortalwrt-src
         run: |
+          # uci-custom 脚本
           mkdir -p files/etc/uci-defaults
           cp $GITHUB_WORKSPACE/uci-custom files/etc/uci-defaults/99-custom-network
           chmod 0755 files/etc/uci-defaults/99-custom-network
 
-      # 只缓存 dl/，避免撑爆磁盘
+          # ✅ 替换 /etc/config/nikki
+          mkdir -p files/etc/config
+          cp $GITHUB_WORKSPACE/nikki files/etc/config/nikki
+          chmod 0777 files/etc/config/nikki
+
       - name: Cache downloads
         uses: actions/cache@v4
         with:
@@ -102,7 +85,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-nikki
-          path: immortalwrt-src/bin/targets/**/*
+          path: immortalwrt-src/bin/targets/x86/64/*
           if-no-files-found: error
           retention-days: 14
 
@@ -115,28 +98,6 @@ jobs:
           echo "TAG=${TAG}" >> $GITHUB_ENV
           echo "Generated tag: ${TAG}"
 
-      # 先创建一个空的 Release（避免找不到 tag）
-      - name: Create empty GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG }}
-          name: "ImmortalWrt Firmware ${{ env.TAG }}"
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # 清理已有资产（如果有）
-      - name: Delete existing release assets
-        uses: mknejp/delete-release-assets@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ env.TAG }}
-          assets: "*"
-          fail-if-no-release: false
-          fail-if-no-assets: false
-
-      # 重新上传文件，允许覆盖
       - name: Upload firmware to Release
         uses: softprops/action-gh-release@v2
         with:
@@ -144,10 +105,11 @@ jobs:
           name: "ImmortalWrt Firmware ${{ env.TAG }}"
           draft: false
           prerelease: false
-          files: immortalwrt-src/bin/targets/**/*
-          overwrite_files: true   # ✅ 正确参数，替代 overwrite
+          files: immortalwrt-src/bin/targets/x86/64/*
+          overwrite_files: true   # ✅ 覆盖已有文件
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 保留最近 3 个 Release
       - name: Delete old releases
         uses: dev-drprasad/delete-older-releases@v0.3.3
         with:
