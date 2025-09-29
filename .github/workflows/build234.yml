@@ -3,7 +3,7 @@ name: Build ImmortalWrt with Nikki and Custom Packages
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "0 19 * * *"
+    - cron: "0 19 * * *"   # 每天 UTC 19 点触发，相当于北京时间次日凌晨 3 点
 
 jobs:
   build:
@@ -41,6 +41,8 @@ jobs:
         working-directory: immortalwrt-src
         run: |
           make defconfig
+
+          # 加载 packages.list 中的插件
           if [ -f $GITHUB_WORKSPACE/packages.list ]; then
             while read -r pkg; do
               [ -n "$pkg" ] && echo "CONFIG_PACKAGE_${pkg}=y" >> .config
@@ -61,31 +63,38 @@ jobs:
           echo "CONFIG_PACKAGE_nftables=y" >> .config
           echo "CONFIG_PACKAGE_kmod-nft-core=y" >> .config
           echo "CONFIG_PACKAGE_kmod-nft-nat=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-nft-queue=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-nft-netdev=y" >> .config
 
-          # ✅ 禁用所有 iptables 相关
+          # ✅ 禁用所有 iptables 相关组件
+          echo "CONFIG_PACKAGE_fw3=n" >> .config
           echo "CONFIG_PACKAGE_iptables=n" >> .config
           echo "CONFIG_PACKAGE_ip6tables=n" >> .config
           echo "CONFIG_PACKAGE_iptables-nft=n" >> .config
           echo "CONFIG_PACKAGE_ip6tables-nft=n" >> .config
-          echo "CONFIG_PACKAGE_kmod-ipt-core=n" >> .config
-          echo "CONFIG_PACKAGE_kmod-ipt-nat=n" >> .config
           echo "CONFIG_PACKAGE_iptables-mod-conntrack=n" >> .config
           echo "CONFIG_PACKAGE_iptables-mod-ipopt=n" >> .config
           echo "CONFIG_PACKAGE_iptables-mod-tproxy=n" >> .config
+          echo "CONFIG_PACKAGE_kmod-ipt-core=n" >> .config
+          echo "CONFIG_PACKAGE_kmod-ipt-nat=n" >> .config
+          echo "CONFIG_PACKAGE_kmod-ipt-conntrack=n" >> .config
+          echo "CONFIG_PACKAGE_kmod-ipt-ipopt=n" >> .config
+          echo "CONFIG_PACKAGE_kmod-ipt-tproxy=n" >> .config
 
           # 设置 ROOTFS_PARTSIZE=1024 (1GB)
           echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
 
           make defconfig
 
-      - name: Verify no iptables left
+      - name: Verify iptables fully disabled
         working-directory: immortalwrt-src
         run: |
-          if grep -q "CONFIG_PACKAGE_iptables=y" .config; then
-            echo "❌ iptables 仍然启用，请检查依赖！"
+          echo "🔍 检查是否残留 iptables 配置..."
+          if grep -E "CONFIG_PACKAGE_(iptables|fw3|kmod-ipt)-.*=y" .config; then
+            echo "❌ 检测到残留 iptables 配置，请检查依赖链或 feeds！"
             exit 1
           fi
-          echo "✅ 已确认 iptables 完全禁用"
+          echo "✅ iptables 已完全禁用，使用纯 nftables 防火墙"
 
       - name: Prepare custom files (uci-custom + nikki)
         working-directory: immortalwrt-src
