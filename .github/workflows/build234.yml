@@ -2,8 +2,8 @@ name: Build ImmortalWrt with Nikki and Custom Packages
 
 on:
   workflow_dispatch: {}
-  #schedule:
-  #  - cron: "0 19 * * *"   # 每天 UTC 19 点触发，相当于北京时间次日凌晨 3 点
+  schedule:
+    - cron: "0 19 * * *"   # 每天 UTC 19 点触发，相当于北京时间次日凌晨 3 点
 
 jobs:
   build:
@@ -47,20 +47,44 @@ jobs:
               [ -n "$pkg" ] && echo "CONFIG_PACKAGE_${pkg}=y" >> .config
             done < $GITHUB_WORKSPACE/packages.list
           fi
+
+          # Nikki 包
           echo "CONFIG_PACKAGE_nikki=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config
+
+          # dnsmasq-full 替换 dnsmasq
           echo "CONFIG_PACKAGE_dnsmasq=n" >> .config
           echo "CONFIG_PACKAGE_dnsmasq-full=y" >> .config
+
+          # ✅ 使用 nftables 防火墙，禁用 iptables
+          echo "CONFIG_PACKAGE_iptables=n" >> .config
+          echo "CONFIG_PACKAGE_ip6tables=n" >> .config
+          echo "CONFIG_PACKAGE_kmod-ipt-core=n" >> .config
+          echo "CONFIG_PACKAGE_kmod-ipt-nat=n" >> .config
+          echo "CONFIG_PACKAGE_iptables-mod-nat=n" >> .config
+
+          echo "CONFIG_PACKAGE_nftables=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-nft-core=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-nft-nat=y" >> .config
+          echo "CONFIG_PACKAGE_fw4=y" >> .config
+
+          # 设置 ROOTFS_PARTSIZE=1024 (1GB)
           echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
+
           make defconfig
 
-      - name: Prepare custom files (uci-custom)
+      - name: Prepare custom files (uci-custom + nikki)
         working-directory: immortalwrt-src
         run: |
           mkdir -p files/etc/uci-defaults
           cp $GITHUB_WORKSPACE/uci-custom files/etc/uci-defaults/99-custom-network
           chmod 0755 files/etc/uci-defaults/99-custom-network
+
+          # 替换 /etc/config/nikki
+          mkdir -p files/etc/config
+          cp $GITHUB_WORKSPACE/nikki files/etc/config/nikki
+          chmod 0777 files/etc/config/nikki
 
       - name: Cache downloads
         uses: actions/cache@v4
@@ -100,7 +124,7 @@ jobs:
           draft: false
           prerelease: false
           files: immortalwrt-src/bin/targets/x86/64/*
-          overwrite_files: true   # ✅ 正确参数，允许覆盖已有文件
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
