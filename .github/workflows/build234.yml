@@ -3,7 +3,7 @@ name: Build ImmortalWrt with Nikki and Custom Packages
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "0 19 * * *"   # 每天 UTC 19 点触发，相当于北京时间次日凌晨 3 点
+    - cron: "0 19 * * *"
 
 jobs:
   build:
@@ -30,7 +30,6 @@ jobs:
         working-directory: immortalwrt-src
         run: |
           echo "src-git nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main" >> feeds.conf.default
-          cat feeds.conf.default
 
       - name: Update & install feeds
         working-directory: immortalwrt-src
@@ -57,22 +56,36 @@ jobs:
           echo "CONFIG_PACKAGE_dnsmasq=n" >> .config
           echo "CONFIG_PACKAGE_dnsmasq-full=y" >> .config
 
-          # ✅ 使用 nftables 防火墙，禁用 iptables
-          echo "CONFIG_PACKAGE_iptables=n" >> .config
-          echo "CONFIG_PACKAGE_ip6tables=n" >> .config
-          echo "CONFIG_PACKAGE_kmod-ipt-core=n" >> .config
-          echo "CONFIG_PACKAGE_kmod-ipt-nat=n" >> .config
-          echo "CONFIG_PACKAGE_iptables-mod-nat=n" >> .config
-
+          # ✅ 强制使用 nftables 防火墙
+          echo "CONFIG_PACKAGE_fw4=y" >> .config
           echo "CONFIG_PACKAGE_nftables=y" >> .config
           echo "CONFIG_PACKAGE_kmod-nft-core=y" >> .config
           echo "CONFIG_PACKAGE_kmod-nft-nat=y" >> .config
-          echo "CONFIG_PACKAGE_fw4=y" >> .config
+
+          # ✅ 禁用所有 iptables 相关
+          echo "CONFIG_PACKAGE_iptables=n" >> .config
+          echo "CONFIG_PACKAGE_ip6tables=n" >> .config
+          echo "CONFIG_PACKAGE_iptables-nft=n" >> .config
+          echo "CONFIG_PACKAGE_ip6tables-nft=n" >> .config
+          echo "CONFIG_PACKAGE_kmod-ipt-core=n" >> .config
+          echo "CONFIG_PACKAGE_kmod-ipt-nat=n" >> .config
+          echo "CONFIG_PACKAGE_iptables-mod-conntrack=n" >> .config
+          echo "CONFIG_PACKAGE_iptables-mod-ipopt=n" >> .config
+          echo "CONFIG_PACKAGE_iptables-mod-tproxy=n" >> .config
 
           # 设置 ROOTFS_PARTSIZE=1024 (1GB)
           echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
 
           make defconfig
+
+      - name: Verify no iptables left
+        working-directory: immortalwrt-src
+        run: |
+          if grep -q "CONFIG_PACKAGE_iptables=y" .config; then
+            echo "❌ iptables 仍然启用，请检查依赖！"
+            exit 1
+          fi
+          echo "✅ 已确认 iptables 完全禁用"
 
       - name: Prepare custom files (uci-custom + nikki)
         working-directory: immortalwrt-src
@@ -81,7 +94,6 @@ jobs:
           cp $GITHUB_WORKSPACE/uci-custom files/etc/uci-defaults/99-custom-network
           chmod 0755 files/etc/uci-defaults/99-custom-network
 
-          # 替换 /etc/config/nikki
           mkdir -p files/etc/config
           cp $GITHUB_WORKSPACE/nikki files/etc/config/nikki
           chmod 0777 files/etc/config/nikki
@@ -114,7 +126,6 @@ jobs:
           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
           TAG="auto-${DATE}-${SHORT_SHA}"
           echo "TAG=${TAG}" >> $GITHUB_ENV
-          echo "Generated tag: ${TAG}"
 
       - name: Upload firmware to Release
         uses: softprops/action-gh-release@v2
