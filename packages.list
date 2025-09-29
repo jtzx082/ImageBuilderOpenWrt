@@ -115,7 +115,7 @@ luci-i18n-argon-config-zh-cn
 luci-theme-argon
 luci-app-netdata
 luci-i18n-netdata-zh-cn
-luci-app-unblockneteasemusic
-luci-app-vlmcsd
-luci-i18n-vlmcsd-zh-cn
+-luci-app-unblockneteasemusic
+-luci-app-vlmcsd
+-luci-i18n-vlmcsd-zh-cn
 bash
