@@ -100,8 +100,8 @@ luci-app-banip
 luci-i18n-banip-zh-cn
 luci-app-arpbind
 luci-i18n-arpbind-zh-cn
-luci-app-homeproxy
-luci-i18n-homeproxy-zh-cn
+-luci-app-homeproxy
+-luci-i18n-homeproxy-zh-cn
 luci-app-autoreboot
 luci-i18n-autoreboot-zh-cn
 luci-app-uhttpd
