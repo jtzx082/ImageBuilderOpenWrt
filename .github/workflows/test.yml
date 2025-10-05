@@ -1,91 +1,119 @@
-name: Build ImmortalWrt Firmware
+name: Build ImmortalWrt with Nikki and Custom Packages
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 19 * * *"   # 每天 UTC 19 点触发，相当于北京时间次日凌晨 3 点
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
-      - name: 检出仓库
+      - name: Checkout user repo
         uses: actions/checkout@v4
 
-      - name: 安装依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk git wget unzip \
-            file libssl-dev python3 zstd qemu-utils genisoimage grub2 tar gzip binutils
+      - name: Checkout ImmortalWrt source
+        uses: actions/checkout@v4
+        with:
+          repository: immortalwrt/immortalwrt
+          ref: v24.10.3
+          path: immortalwrt-src
 
-      - name: 下载 ImageBuilder
+      - name: Free disk space
         run: |
-          wget https://downloads.immortalwrt.org/releases/24.10.3/targets/x86/64/immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64.tar.zst
-          tar -I zstd -xf immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64.tar.zst
-          mv immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64 imagebuilder
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          df -h
 
-      - name: 准备覆盖文件
+      - name: Add Nikki feed
+        working-directory: immortalwrt-src
         run: |
-          mkdir -p imagebuilder/files/etc/config
-          # 如果仓库有 etc/config，就替换
-          if [ -d "etc/config" ]; then
-            rm -rf imagebuilder/files/etc/config
-            cp -a etc/config imagebuilder/files/etc/
-            chmod -R 0777 imagebuilder/files/etc/config
+          echo "src-git nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main" >> feeds.conf.default
+          cat feeds.conf.default
+
+      - name: Update & install feeds
+        working-directory: immortalwrt-src
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Configure build
+        working-directory: immortalwrt-src
+        run: |
+          make defconfig
+          if [ -f $GITHUB_WORKSPACE/packages.list ]; then
+            while read -r pkg; do
+              [ -n "$pkg" ] && echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+            done < $GITHUB_WORKSPACE/packages.list
           fi
-          # 如果有 uci-custom
-          if [ -f "uci-custom" ]; then
-            mkdir -p imagebuilder/files/etc/uci-defaults
-            cp uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
-            chmod 0777 imagebuilder/files/etc/uci-defaults/99-custom-network
-          fi
+          echo "CONFIG_PACKAGE_nikki=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
+          echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config
+          echo "CONFIG_PACKAGE_dnsmasq=n" >> .config
+          echo "CONFIG_PACKAGE_dnsmasq-full=y" >> .config
+          echo "CONFIG_TARGET_ROOTFS_PARTSIZE=1024" >> .config
+          make defconfig
 
-      - name: 打包 nikki 为 ipk
+      - name: Prepare custom files (uci-custom + nikki)
+        working-directory: immortalwrt-src
         run: |
-          mkdir -p imagebuilder/packages
-          WORKDIR=$(mktemp -d)
-          mkdir -p "$WORKDIR/CONTROL" "$WORKDIR/data/usr/bin"
+          # uci-custom 脚本
+          mkdir -p files/etc/uci-defaults
+          cp $GITHUB_WORKSPACE/uci-custom files/etc/uci-defaults/99-custom-network
+          chmod 0755 files/etc/uci-defaults/99-custom-network
 
-          if [ -f "nikki" ]; then
-            cp nikki "$WORKDIR/data/usr/bin/nikki"
-            chmod 0777 "$WORKDIR/data/usr/bin/nikki"
-          else
-            echo "未找到 nikki 文件，跳过"
-            exit 1
-          fi
+          # ✅ 替换 /etc/config/nikki
+          mkdir -p files/etc/config
+          cp $GITHUB_WORKSPACE/nikki files/etc/config/nikki
+          chmod 0777 files/etc/config/nikki
 
-          cat > "$WORKDIR/CONTROL/control" << 'EOF'
-Package: nikki
-Version: 1.0
-Architecture: all
-Maintainer: CI
-Section: utils
-Priority: optional
-Description: 本地 nikki 工具
-EOF
+      - name: Cache downloads
+        uses: actions/cache@v4
+        with:
+          path: immortalwrt-src/dl
+          key: ${{ runner.os }}-immortalwrt-dl-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-immortalwrt-dl-
 
-          (cd "$WORKDIR" && tar -czf control.tar.gz -C CONTROL control)
-          (cd "$WORKDIR" && tar -czf data.tar.gz -C data .)
-          echo "2.0" > "$WORKDIR/debian-binary"
-          (cd "$WORKDIR" && ar r nikki_1.0_all.ipk control.tar.gz data.tar.gz debian-binary)
-
-          mv "$WORKDIR/nikki_1.0_all.ipk" imagebuilder/packages/
-
-      - name: 构建固件
-        working-directory: imagebuilder
+      - name: Build firmware
+        working-directory: immortalwrt-src
         run: |
-          # 如果没有 packages.list，就用空
-          if [ -f ../packages.list ]; then
-            PKGS="$(tr '\n' ' ' < ../packages.list)"
-          else
-            PKGS=""
-          fi
-          make image \
-            PACKAGES="$PKGS nikki" \
-            FILES="files" \
-            ROOTFS_PARTSIZE=1024
+          make -j$(nproc) || make -j1 V=s
 
-      - name: 上传固件
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: immortalwrt-firmware
-          path: imagebuilder/bin/targets/x86/64/*
+          name: immortalwrt-nikki
+          path: immortalwrt-src/bin/targets/x86/64/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Generate tag name
+        id: tag
+        run: |
+          DATE=$(date +'%Y%m%d')
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          TAG="auto-${DATE}-${SHORT_SHA}"
+          echo "TAG=${TAG}" >> $GITHUB_ENV
+          echo "Generated tag: ${TAG}"
+
+      - name: Upload firmware to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: "ImmortalWrt Firmware ${{ env.TAG }}"
+          draft: false
+          prerelease: false
+          files: immortalwrt-src/bin/targets/x86/64/*
+          overwrite_files: true   # ✅ 覆盖已有文件
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete old releases
+        uses: dev-drprasad/delete-older-releases@v0.3.3
+        with:
+          keep_latest: 3
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
