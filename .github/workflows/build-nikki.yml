@@ -14,9 +14,9 @@ jobs:
       # 1. 拉取 OpenWrt SDK（推荐使用官方 SDK 而不是完整源码，速度快）
       - name: Checkout OpenWrt SDK
         run: |
-          wget https://downloads.openwrt.org/releases/24.10.0/targets/x86/64/openwrt-sdk-24.10.0-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          tar -xf openwrt-sdk-24.10.0-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          mv openwrt-sdk-24.10.0-x86-64_gcc-12.3.0_musl.Linux-x86_64 openwrt-sdk
+          wget https://downloads.openwrt.org/releases/24.10.3/targets/x86/64/openwrt-sdk-24.10.3-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          tar -xf openwrt-sdk-24.10.3-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          mv openwrt-sdk-24.10.3-x86-64_gcc-13.3.0_musl.Linux-x86_64
 
       # 2. 拉取 nikki 插件源码
       - name: Checkout Nikki plugin
