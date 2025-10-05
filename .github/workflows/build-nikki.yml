@@ -46,7 +46,7 @@ jobs:
 
       - name: Place packages into SDK
         run: |
-          for pkg in nikki luci-app-nikki luci-i18n-nikki-zh-cn luci-i18n-nikki-zh-tw; do
+          for pkg in nikki luci-app-nikki; do
             if [ -d "src-nikki/$pkg" ]; then
               cp -r "src-nikki/$pkg" "openwrt-sdk/package/$pkg"
             else
@@ -65,17 +65,9 @@ jobs:
         working-directory: openwrt-sdk
         run: make package/nikki/compile V=s
 
-      - name: Build luci-app-nikki
+      - name: Build luci-app-nikki (with i18n)
         working-directory: openwrt-sdk
         run: make package/luci-app-nikki/compile V=s
-
-      - name: Build luci i18n zh-cn
-        working-directory: openwrt-sdk
-        run: make package/luci-i18n-nikki-zh-cn/compile V=s
-
-      - name: Build luci i18n zh-tw
-        working-directory: openwrt-sdk
-        run: make package/luci-i18n-nikki-zh-tw/compile V=s
 
       - name: Collect built packages
         id: collect
