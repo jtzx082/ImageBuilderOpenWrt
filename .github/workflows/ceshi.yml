@@ -1,10 +1,7 @@
-name: Build ImmortalWrt Firmware(ceshi)
+name: Build ImmortalWrt Firmware
 
 on:
   workflow_dispatch:
-  #push:
-  #  branches:
-  #    - main
 
 jobs:
   build:
@@ -29,63 +26,39 @@ jobs:
 
       - name: Prepare overlay and external packages
         run: |
-          # Overlay base
           mkdir -p imagebuilder/files/etc/uci-defaults
           cp uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
 
-          # External IPKs (optional)
           mkdir -p imagebuilder/packages
           cp -n packages/*.ipk imagebuilder/packages/ || true
 
-          # Ensure etc/config exists for nikki replacement
           mkdir -p imagebuilder/files/etc/config
+          mkdir -p imagebuilder/files/usr/bin
 
       - name: Compile or prepare nikki
         run: |
           set -e
-          mkdir -p imagebuilder/files/usr/bin
-          # Decide how to handle the root-level "nikki":
-          # - If nikki.c exists: compile C source to a binary
-          # - Else if nikki is executable script/binary: copy directly
           if [ -f nikki.c ]; then
-            echo "Compiling nikki.c -> nikki (C source)"
+            echo "Compiling nikki.c -> nikki"
             gcc -O2 -s -o nikki nikki.c
           elif [ -f nikki ]; then
             echo "Using existing nikki file"
-            # If it's not executable, make it executable
             chmod +x nikki || true
           else
-            echo "ERROR: Neither nikki.c nor nikki found in repository root." >&2
+            echo "ERROR: No nikki source or binary found" >&2
             exit 1
           fi
 
-          # Install nikki binary/script to /usr/bin in overlay
           cp nikki imagebuilder/files/usr/bin/nikki
+          chmod 0777 imagebuilder/files/usr/bin/nikki
+          sudo chown root:root imagebuilder/files/usr/bin/nikki
 
-          # Replace firmware /etc/config/nikki with repo version (if provided)
           if [ -f etc-config-nikki ]; then
-            echo "Using provided etc-config-nikki as /etc/config/nikki"
             cp etc-config-nikki imagebuilder/files/etc/config/nikki
           elif [ -f nikki.config ]; then
-            echo "Using nikki.config as /etc/config/nikki"
             cp nikki.config imagebuilder/files/etc/config/nikki
-          elif [ -f nikki ]; then
-            # If the root nikki is intended as the config (rare), copy it
-            # Prefer explicit config file naming (etc-config-nikki or nikki.config)
-            file_type=$(file -b nikki)
-            if echo "$file_type" | grep -qi "text"; then
-              echo "Treating text 'nikki' as /etc/config/nikki"
-              cp nikki imagebuilder/files/etc/config/nikki
-            else
-              echo "No explicit nikki config file found; skipping config replacement"
-            fi
           fi
 
-          # Highest permissions and ownership for both binary and config
-          if [ -f imagebuilder/files/usr/bin/nikki ]; then
-            chmod 0777 imagebuilder/files/usr/bin/nikki
-            sudo chown root:root imagebuilder/files/usr/bin/nikki
-          fi
           if [ -f imagebuilder/files/etc/config/nikki ]; then
             chmod 0777 imagebuilder/files/etc/config/nikki
             sudo chown root:root imagebuilder/files/etc/config/nikki
@@ -93,7 +66,6 @@ jobs:
 
       - name: Sanitize packages list
         run: |
-          # Produce a clean, space-separated package list (strip comments/blank lines)
           awk 'NF && $1 !~ /^#/ {printf "%s ", $0}' packages.list > clean_packages.list
           cat clean_packages.list
 
@@ -105,16 +77,13 @@ jobs:
             PACKAGES="$PKGS" \
             FILES="files" \
             ROOTFS_PARTSIZE=1024
-          # Generate checksums for reproducibility
-          find bin/targets -type f -maxdepth 4 -print0 | xargs -0 sha256sum > bin/targets/x86/64/sha256sums.txt || true
+          sha256sum bin/targets/x86/64/* > bin/targets/x86/64/sha256sums.txt
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-firmware
-          path: |
-            imagebuilder/bin/targets/x86/64/*
-            imagebuilder/bin/targets/x86/64/sha256sums.txt
+          path: imagebuilder/bin/targets/x86/64/*
 
       - name: Generate tag name
         id: tag
@@ -131,6 +100,6 @@ jobs:
           name: "ImmortalWrt Firmware ${{ env.TAG }}"
           draft: false
           prerelease: false
+          overwrite: true
           files: |
             imagebuilder/bin/targets/x86/64/*
-            imagebuilder/bin/targets/x86/64/sha256sums.txt
