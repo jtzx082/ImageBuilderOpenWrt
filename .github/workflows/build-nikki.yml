@@ -1,58 +1,106 @@
-name: Build Nikki Plugin (x86-64)
+name: Build Nikki Suite (x86-64)
 
 on:
   workflow_dispatch:
+    inputs:
+      nikki_ref:
+        description: 'OpenWrt-nikki.git commit/branch/tag to build'
+        required: false
+        default: ''
   push:
     branches:
       - main
 
 jobs:
-  build-nikki:
+  build-nikki-suite:
     runs-on: ubuntu-22.04
 
+    env:
+      OPENWRT_VERSION: 24.10.3
+      TARGET_DIR: x86/64
+      ARCH_DIR: x86_64
+      SDK_DIRNAME: openwrt-sdk-24.10.3-x86-64_gcc-13.3.0_musl.Linux-x86_64
+      SDK_ARCHIVE: openwrt-sdk-24.10.3-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+
     steps:
-      # 1. 拉取 OpenWrt SDK（24.10.3 x86-64）
-      - name: Download OpenWrt SDK
-        run: |
-          wget https://downloads.openwrt.org/releases/24.10.3/targets/x86/64/openwrt-sdk-24.10.3-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-          tar --use-compress-program=unzstd -xf openwrt-sdk-24.10.3-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-          mv openwrt-sdk-24.10.3-x86-64_gcc-13.3.0_musl.Linux-x86_64 openwrt-sdk
-
-      # 2. 拉取 nikki 插件源码
-      - name: Checkout Nikki plugin
-        run: |
-          git clone https://github.com/nikkinikki-org/OpenWrt-nikki.git nikki
-
-      # 3. 将 nikki 插件放入 SDK 的 package 目录
-      - name: Move plugin into SDK
-        run: |
-          cp -r nikki openwrt-sdk/package/nikki
-
-      # 4. 安装编译依赖
-      - name: Install build dependencies
+      - name: Prepare environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison g++ gawk \
-            gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
-            python3-distutils rsync unzip zlib1g-dev file wget zstd
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+            gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip \
+            zlib1g-dev file wget zstd
 
-      # 5. 更新 feeds 并选择 nikki
-      - name: Update feeds
+      - name: Download OpenWrt SDK
+        run: |
+          wget https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET_DIR}/${SDK_ARCHIVE}
+          tar --use-compress-program=unzstd -xf ${SDK_ARCHIVE}
+          mv ${SDK_DIRNAME} openwrt-sdk
+
+      - name: Fetch OpenWrt-nikki source
+        run: |
+          git clone https://github.com/nikkinikki-org/OpenWrt-nikki.git src-nikki
+          if [ -n "${{ github.event.inputs.nikki_ref }}" ]; then
+            cd src-nikki && git checkout "${{ github.event.inputs.nikki_ref }}"
+          fi
+
+      - name: Place packages into SDK
+        run: |
+          for pkg in nikki luci-app-nikki luci-i18n-nikki-zh-cn luci-i18n-nikki-zh-tw; do
+            if [ -d "src-nikki/$pkg" ]; then
+              cp -r "src-nikki/$pkg" "openwrt-sdk/package/$pkg"
+            else
+              echo "Missing package directory: src-nikki/$pkg" && exit 1
+            fi
+          done
+
+      - name: Update feeds and defconfig
         working-directory: openwrt-sdk
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           make defconfig
 
-      # 6. 编译 nikki 插件
-      - name: Build Nikki
+      - name: Build nikki core
+        working-directory: openwrt-sdk
+        run: make package/nikki/compile V=s
+
+      - name: Build luci-app-nikki
+        working-directory: openwrt-sdk
+        run: make package/luci-app-nikki/compile V=s
+
+      - name: Build luci i18n zh-cn
+        working-directory: openwrt-sdk
+        run: make package/luci-i18n-nikki-zh-cn/compile V=s
+
+      - name: Build luci i18n zh-tw
+        working-directory: openwrt-sdk
+        run: make package/luci-i18n-nikki-zh-tw/compile V=s
+
+      - name: Collect built packages
+        id: collect
         working-directory: openwrt-sdk
         run: |
-          make package/nikki/compile V=s
+          mkdir -p ../release-ipks
+          find bin/packages/${ARCH_DIR} -type f -name 'nikki*.ipk' -exec cp {} ../release-ipks/ \;
+          find bin/packages/${ARCH_DIR} -type f -name 'luci-app-nikki*.ipk' -exec cp {} ../release-ipks/ \;
+          find bin/packages/${ARCH_DIR} -type f -name 'luci-i18n-nikki-zh-cn*.ipk' -exec cp {} ../release-ipks/ \;
+          find bin/packages/${ARCH_DIR} -type f -name 'luci-i18n-nikki-zh-tw*.ipk' -exec cp {} ../release-ipks/ \;
+          echo "release_tag=nikki-${{ env.OPENWRT_VERSION }}-${{ github.sha }}" >> $GITHUB_OUTPUT
 
-      # 7. 上传编译好的 ipk 作为 artifact
-      - name: Upload artifact
+      - name: Upload artifacts (backup)
         uses: actions/upload-artifact@v4
         with:
-          name: nikki-ipk
-          path: openwrt-sdk/bin/packages/x86_64/*/nikki*.ipk
+          name: nikki-x86_64-ipk
+          path: release-ipks/*.ipk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.collect.outputs.release_tag }}
+          name: Nikki Suite for OpenWrt ${{ env.OPENWRT_VERSION }} (${{ github.sha }})
+          draft: false
+          prerelease: false
+          files: release-ipks/*.ipk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
