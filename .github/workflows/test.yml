@@ -1,0 +1,119 @@
+name: 构建 ImmortalWrt 固件
+
+on:
+  workflow_dispatch:
+  #push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 拉取仓库代码
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      # 2. 安装构建依赖
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev gawk git wget unzip \
+            file libssl-dev python3 zstd qemu-utils genisoimage grub2 tar gzip binutils
+
+      # 3. 下载 ImageBuilder
+      - name: 下载 ImageBuilder
+        run: |
+          wget https://downloads.immortalwrt.org/releases/24.10.3/targets/x86/64/immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64.tar.zst
+          tar -I zstd -xf immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64.tar.zst
+          mv immortalwrt-imagebuilder-24.10.3-x86-64.Linux-x86_64 imagebuilder
+
+      # 4. 准备覆盖文件，替换 /etc/config
+      - name: 准备覆盖文件并替换 /etc/config
+        run: |
+          mkdir -p imagebuilder/files/etc/uci-defaults
+          mkdir -p imagebuilder/files/etc/config
+
+          # 如果仓库有 etc/config，则完全替换
+          if [ -d "etc/config" ]; then
+            rm -rf imagebuilder/files/etc/config
+            mkdir -p imagebuilder/files/etc
+            cp -a etc/config imagebuilder/files/etc/
+            chmod -R 0777 imagebuilder/files/etc/config
+          fi
+
+          # 如果有 uci-custom 脚本，则复制并赋予最高权限
+          if [ -f "uci-custom" ]; then
+            cp uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
+            chmod 0777 imagebuilder/files/etc/uci-defaults/99-custom-network
+          fi
+
+      # 5. 将 nikki 打包为本地 ipk
+      - name: 打包 nikki 为本地 ipk
+        run: |
+          mkdir -p imagebuilder/packages
+          WORKDIR=$(mktemp -d)
+          mkdir -p "$WORKDIR/CONTROL" "$WORKDIR/data/usr/bin"
+
+          cp nikki "$WORKDIR/data/usr/bin/nikki"
+          chmod 0777 "$WORKDIR/data/usr/bin/nikki"
+
+          cat > "$WORKDIR/CONTROL/control" << 'EOF'
+Package: nikki
+Version: 1.0
+Architecture: x86_64
+Maintainer: CI
+Section: utils
+Priority: optional
+Description: 本地 nikki 工具，安装到 /usr/bin，最高权限
+EOF
+
+          (cd "$WORKDIR" && tar -czf control.tar.gz -C CONTROL control)
+          (cd "$WORKDIR" && tar -czf data.tar.gz -C data .)
+          echo "2.0" > "$WORKDIR/debian-binary"
+          ar r "$WORKDIR/nikki_1.0_x86_64.ipk" "$WORKDIR/control.tar.gz" "$WORKDIR/data.tar.gz" "$WORKDIR/debian-binary"
+
+          mv "$WORKDIR/nikki_1.0_x86_64.ipk" imagebuilder/packages/
+
+      # 6. 复制外部 ipk（如果有）
+      - name: 准备外部 ipk 包
+        run: |
+          mkdir -p imagebuilder/packages
+          cp packages/*.ipk imagebuilder/packages/ || true
+
+      # 7. 构建固件
+      - name: 构建固件
+        working-directory: imagebuilder
+        run: |
+          PKGS="$(tr '\n' ' ' < ../packages.list) nikki"
+          make image \
+            PACKAGES="$PKGS" \
+            FILES="files" \
+            ROOTFS_PARTSIZE=1024
+
+      # 8. 上传构建产物
+      - name: 上传固件
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-firmware
+          path: imagebuilder/bin/targets/x86/64/*
+
+      # 9. 生成自动标签
+      - name: 生成标签
+        id: tag
+        run: |
+          DATE=$(date +'%Y%m%d')
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          echo "TAG=auto-${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
+          echo "生成的标签: auto-${DATE}-${SHORT_SHA}"
+
+      # 10. 创建 Release
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: "ImmortalWrt 固件 ${{ env.TAG }}"
+          draft: false
+          prerelease: false
+          files: imagebuilder/bin/targets/x86/64/*
