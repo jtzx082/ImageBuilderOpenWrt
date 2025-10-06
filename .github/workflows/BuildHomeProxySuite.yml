@@ -4,12 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       homeproxy_ref:
-        description: 'immortalwrt/homeproxy.git commit/branch/tag to build'
+        description: 'homeproxy commit/branch/tag to build (default: master)'
         required: false
-        default: ''
- # push:
- #   branches:
- #     - main
+        default: 'master'
 
 jobs:
   build-homeproxy-suite:
@@ -40,19 +37,16 @@ jobs:
       - name: Fetch homeproxy source
         run: |
           git clone https://github.com/immortalwrt/homeproxy.git src-homeproxy
-          if [ -n "${{ github.event.inputs.homeproxy_ref }}" ]; then
-            cd src-homeproxy && git checkout "${{ github.event.inputs.homeproxy_ref }}"
-          fi
+          cd src-homeproxy
+          git checkout "${{ github.event.inputs.homeproxy_ref }}"
 
-      - name: Place packages into SDK
+      - name: Place luci-app-homeproxy into SDK
         run: |
-          for pkg in homeproxy luci-app-homeproxy; do
-            if [ -d "src-homeproxy/$pkg" ]; then
-              cp -r "src-homeproxy/$pkg" "openwrt-sdk/package/$pkg"
-            else
-              echo "Missing package directory: src-homeproxy/$pkg" && exit 1
-            fi
-          done
+          if [ -d "src-homeproxy/luci-app-homeproxy" ]; then
+            cp -r "src-homeproxy/luci-app-homeproxy" "openwrt-sdk/package/luci-app-homeproxy"
+          else
+            echo "Missing luci-app-homeproxy directory" && exit 1
+          fi
 
       - name: Update feeds and defconfig
         working-directory: openwrt-sdk
@@ -60,10 +54,6 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           make defconfig
-
-      - name: Build homeproxy core
-        working-directory: openwrt-sdk
-        run: make package/homeproxy/compile V=s
 
       - name: Build luci-app-homeproxy (with i18n)
         working-directory: openwrt-sdk
@@ -74,7 +64,6 @@ jobs:
         working-directory: openwrt-sdk
         run: |
           mkdir -p ../release-ipks
-          find bin/packages/${ARCH_DIR} -type f -name 'homeproxy*.ipk' -exec cp {} ../release-ipks/ \;
           find bin/packages/${ARCH_DIR} -type f -name 'luci-app-homeproxy*.ipk' -exec cp {} ../release-ipks/ \;
           find bin/packages/${ARCH_DIR} -type f -name 'luci-i18n-homeproxy-zh-cn*.ipk' -exec cp {} ../release-ipks/ \;
           echo "release_tag=homeproxy-${{ env.OPENWRT_VERSION }}-${{ github.sha }}" >> $GITHUB_OUTPUT
