@@ -38,16 +38,12 @@ jobs:
         working-directory: openwrt-sdk
         run: |
           echo "src-git homeproxy https://github.com/immortalwrt/homeproxy.git;${{ github.event.inputs.homeproxy_ref }}" >> feeds.conf.default
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          ./scripts/feeds update homeproxy
+          ./scripts/feeds install -a -p homeproxy
 
       - name: Defconfig
         working-directory: openwrt-sdk
         run: make defconfig
-
-      - name: Build homeproxy core
-        working-directory: openwrt-sdk
-        run: make package/feeds/homeproxy/homeproxy/compile V=s
 
       - name: Build luci-app-homeproxy (with i18n)
         working-directory: openwrt-sdk
@@ -58,7 +54,6 @@ jobs:
         working-directory: openwrt-sdk
         run: |
           mkdir -p ../release-ipks
-          find bin/packages/${ARCH_DIR} -type f -name 'homeproxy*.ipk' -exec cp {} ../release-ipks/ \;
           find bin/packages/${ARCH_DIR} -type f -name 'luci-app-homeproxy*.ipk' -exec cp {} ../release-ipks/ \;
           find bin/packages/${ARCH_DIR} -type f -name 'luci-i18n-homeproxy-*.ipk' -exec cp {} ../release-ipks/ \;
           echo "release_tag=homeproxy-${{ env.OPENWRT_VERSION }}-${{ github.sha }}" >> $GITHUB_OUTPUT
