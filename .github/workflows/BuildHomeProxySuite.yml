@@ -40,13 +40,10 @@ jobs:
           cd src-homeproxy
           git checkout "${{ github.event.inputs.homeproxy_ref }}"
 
-      - name: Place luci-app-homeproxy into SDK
+      - name: Place homeproxy package into SDK
         run: |
-          if [ -d "src-homeproxy/luci-app-homeproxy" ]; then
-            cp -r "src-homeproxy/luci-app-homeproxy" "openwrt-sdk/package/luci-app-homeproxy"
-          else
-            echo "Missing luci-app-homeproxy directory" && exit 1
-          fi
+          # 整个仓库就是 luci-app-homeproxy
+          cp -r src-homeproxy openwrt-sdk/package/luci-app-homeproxy
 
       - name: Update feeds and defconfig
         working-directory: openwrt-sdk
