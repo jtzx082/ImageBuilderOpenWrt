@@ -63,7 +63,7 @@ jobs:
 
       - name: Build nikki core
         working-directory: openwrt-sdk
-        run: make package/nikki/compile V=s
+        run: make package/nikki/compile | tee build-nikki.log
 
       - name: Build luci-app-nikki (with i18n)
         working-directory: openwrt-sdk
