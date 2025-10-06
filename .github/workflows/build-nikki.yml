@@ -6,7 +6,7 @@ on:
       nikki_ref:
         description: 'OpenWrt-nikki.git commit/branch/tag to build'
         required: false
-        default: ''
+        default: 'main'
  # push:
  #   branches:
  #     - main
