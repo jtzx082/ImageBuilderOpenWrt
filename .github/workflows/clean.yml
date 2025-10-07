@@ -1,23 +1,19 @@
-name: Cleanup Old Workflow Runs
+name: Cleanup All Completed Workflow Runs
 
 on:
-#  schedule:
-#    - cron: "0 3 * * *"   # 每天凌晨 3 点执行
-  workflow_dispatch:       # 允许手动触发
+  # schedule:
+  #   - cron: "0 3 * * *"   # 已注释：每天凌晨 3 点执行
+  workflow_dispatch:         # 仅支持手动触发
 
 jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Delete old workflow runs
+      - name: Delete all completed workflow runs
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            #const daysToKeep = 7; // 保留最近 7 天的运行
-            const cutoff = new Date();
-            cutoff.setDate(cutoff.getDate() - daysToKeep);
-
             const runs = await github.paginate(
               github.rest.actions.listWorkflowRunsForRepo,
               {
@@ -28,8 +24,7 @@ jobs:
             );
 
             for (const run of runs) {
-              const created = new Date(run.created_at);
-              if (created < cutoff && run.status === "completed") {
+              if (run.status === "completed") {
                 console.log(`Deleting run ${run.id} from ${run.created_at}`);
                 await github.rest.actions.deleteWorkflowRun({
                   owner: context.repo.owner,
