@@ -1,0 +1,111 @@
+name: Build-ImmortalWrt-Firmware
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        target: [x86]
+        subtarget: [64]
+        rootfs: [1024, 2048]   # 可同时构建不同 ROOTFS 大小
+        version: [24.10.3]     # 后续升级只需改这里
+    env:
+      IB_ARCH: Linux-x86_64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          df -h
+
+      - name: Cache APT
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/cache/apt
+            /var/lib/apt/lists
+          key: apt-${{ runner.os }}-${{ matrix.version }}
+          restore-keys: |
+            apt-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev gawk git wget unzip \
+            file libssl-dev python3 zstd qemu-utils genisoimage grub2
+
+      - name: Cache ImageBuilder tarball
+        uses: actions/cache@v4
+        with:
+          path: .cache/ib
+          key: ib-tar-${{ runner.os }}-${{ matrix.version }}-${{ matrix.target }}-${{ matrix.subtarget }}
+          restore-keys: |
+            ib-tar-${{ runner.os }}-${{ matrix.version }}-
+
+      - name: Download ImageBuilder
+        run: |
+          mkdir -p .cache/ib
+          IB_TARBALL=immortalwrt-imagebuilder-${{ matrix.version }}-${{ matrix.target }}-${{ matrix.subtarget }}.${{ env.IB_ARCH }}.tar.zst
+          IB_URL=https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/${{ matrix.target }}/${{ matrix.subtarget }}
+          if [ ! -f ".cache/ib/${IB_TARBALL}" ]; then
+            wget -O ".cache/ib/${IB_TARBALL}" "${IB_URL}/${IB_TARBALL}"
+          fi
+          tar -I zstd -xf ".cache/ib/${IB_TARBALL}"
+          mv immortalwrt-imagebuilder-${{ matrix.version }}-${{ matrix.target }}-${{ matrix.subtarget }}.${{ env.IB_ARCH }} imagebuilder
+
+      - name: Cache ImageBuilder work dirs
+        uses: actions/cache@v4
+        with:
+          path: |
+            imagebuilder/dl
+            imagebuilder/build_dir
+            imagebuilder/packages
+          key: ib-work-${{ runner.os }}-${{ matrix.version }}-${{ matrix.target }}-${{ matrix.subtarget }}-${{ hashFiles('packages.list') }}
+          restore-keys: |
+            ib-work-${{ runner.os }}-${{ matrix.version }}-${{ matrix.target }}-${{ matrix.subtarget }}-
+
+      - name: Prepare custom files
+        run: |
+          mkdir -p imagebuilder/files/etc/uci-defaults
+          cp uci-custom imagebuilder/files/etc/uci-defaults/99-custom-network
+          mkdir -p imagebuilder/packages
+          cp packages/*.ipk imagebuilder/packages/ || true
+
+      - name: Build firmware
+        working-directory: imagebuilder
+        run: |
+          PKGS=$(tr '\n' ' ' < ../packages.list)
+          make image \
+            PACKAGES="$PKGS" \
+            FILES="files" \
+            ROOTFS_PARTSIZE=${{ matrix.rootfs }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-${{ matrix.version }}-${{ matrix.target }}-${{ matrix.subtarget }}-rootfs${{ matrix.rootfs }}
+          path: imagebuilder/bin/targets/${{ matrix.target }}/${{ matrix.subtarget }}/*
+
+      - name: Generate tag name
+        id: tag
+        run: |
+          DATE=$(date +'%Y%m%d')
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          echo "TAG=auto-${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
+          echo "Generated tag: auto-${DATE}-${SHORT_SHA}"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: "ImmortalWrt Firmware ${{ env.TAG }}"
+          draft: false
+          prerelease: false
+          files: imagebuilder/bin/targets/${{ matrix.target }}/${{ matrix.subtarget }}/*
