@@ -20,6 +20,17 @@ jobs:
       SDK_ARCHIVE: openwrt-sdk-24.10.3-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
     steps:
+      - name: Free disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          echo "After cleanup:"
+          df -h
+
       - name: Prepare environment
         run: |
           sudo apt-get update
@@ -34,15 +45,14 @@ jobs:
           tar --use-compress-program=unzstd -xf ${SDK_ARCHIVE}
           mv ${SDK_DIRNAME} openwrt-sdk
 
-      - name: Fetch OpenClash source
+      - name: Fetch OpenClash source (shallow clone)
         run: |
-          git clone https://github.com/vernesong/OpenClash.git src-openclash
+          git clone --depth=1 https://github.com/vernesong/OpenClash.git src-openclash
           cd src-openclash
-          git checkout "${{ github.event.inputs.openclash_ref }}"
+          git checkout "${{ github.event.inputs.openclash_ref }}" || true
 
       - name: Place OpenClash package into SDK
         run: |
-          # OpenClash 仓库包含 luci-app-openclash
           cp -r src-openclash/luci-app-openclash openwrt-sdk/package/openclash
 
       - name: Update feeds and defconfig
@@ -55,16 +65,14 @@ jobs:
       - name: Build OpenClash and dependencies
         working-directory: openwrt-sdk
         run: |
-          # 编译 luci-app-openclash 及其依赖
-          make package/openclash/compile | tee build-openclash.log
-          make package/luci-app-openclash/compile | tee -a build-openclash.log
+          make package/openclash/compile -j$(nproc) V=s | tee build-openclash.log
+          make package/luci-app-openclash/compile -j$(nproc) V=s | tee -a build-openclash.log
 
       - name: Collect built packages
         id: collect
         working-directory: openwrt-sdk
         run: |
           mkdir -p ../release-ipks
-          # 收集 OpenClash 相关的所有 ipk
           find bin/packages/${ARCH_DIR} -type f -name 'luci-app-openclash*.ipk' -exec cp {} ../release-ipks/ \;
           find bin/packages/${ARCH_DIR} -type f -name 'luci-i18n-openclash-*.ipk' -exec cp {} ../release-ipks/ \;
           echo "release_tag=openclash-${{ env.OPENWRT_VERSION }}-${{ github.sha }}" >> $GITHUB_OUTPUT
