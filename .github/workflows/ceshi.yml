@@ -25,19 +25,21 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
           df -h
 
-      # ✅ 修复：只缓存 deb 包，不缓存 lock/partial
+      # ✅ 修复：缓存到工作目录下的 .apt-cache，而不是 /var/cache/apt
       - name: Cache APT packages
         uses: actions/cache@v4
         with:
-          path: /var/cache/apt/archives/*.deb
+          path: .apt-cache
           key: apt-${{ runner.os }}-${{ matrix.version }}
           restore-keys: |
             apt-${{ runner.os }}-
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk git wget unzip \
+          mkdir -p .apt-cache/archives/partial
+          sudo apt-get -o dir::cache::archives="$(pwd)/.apt-cache/archives" update
+          sudo apt-get -o dir::cache::archives="$(pwd)/.apt-cache/archives" install -y \
+            build-essential libncurses5-dev gawk git wget unzip \
             file libssl-dev python3 zstd qemu-utils genisoimage grub2
 
       - name: Cache ImageBuilder tarball
