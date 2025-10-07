@@ -1,4 +1,4 @@
-name: Build-ImmortalWrt-Firmware
+name: Build ImmortalWrt Firmware
 
 on:
   workflow_dispatch:
@@ -11,8 +11,8 @@ jobs:
       matrix:
         target: [x86]
         subtarget: [64]
-        rootfs: [1024, 2048]   # 可同时构建不同 ROOTFS 大小
-        version: [24.10.3]     # 后续升级只需改这里
+        rootfs: [1024]
+        version: [24.10.3]
     env:
       IB_ARCH: Linux-x86_64
 
@@ -25,12 +25,11 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
           df -h
 
-      - name: Cache APT
+      # ✅ 修复：只缓存 deb 包，不缓存 lock/partial
+      - name: Cache APT packages
         uses: actions/cache@v4
         with:
-          path: |
-            /var/cache/apt
-            /var/lib/apt/lists
+          path: /var/cache/apt/archives/*.deb
           key: apt-${{ runner.os }}-${{ matrix.version }}
           restore-keys: |
             apt-${{ runner.os }}-
