@@ -25,11 +25,11 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
           df -h
 
-      # ✅ 修复：缓存到工作目录下的 .apt-cache，而不是 /var/cache/apt
+      # ✅ 修复：只缓存 .deb 文件，排除 lock 和 partial
       - name: Cache APT packages
         uses: actions/cache@v4
         with:
-          path: .apt-cache
+          path: .apt-cache/archives/*.deb
           key: apt-${{ runner.os }}-${{ matrix.version }}
           restore-keys: |
             apt-${{ runner.os }}-
@@ -37,6 +37,8 @@ jobs:
       - name: Install dependencies
         run: |
           mkdir -p .apt-cache/archives/partial
+          # 清理可能残留的锁文件，避免缓存报错
+          rm -f .apt-cache/archives/lock
           sudo apt-get -o dir::cache::archives="$(pwd)/.apt-cache/archives" update
           sudo apt-get -o dir::cache::archives="$(pwd)/.apt-cache/archives" install -y \
             build-essential libncurses5-dev gawk git wget unzip \
