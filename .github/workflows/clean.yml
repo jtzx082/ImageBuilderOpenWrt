@@ -1,6 +1,6 @@
 name: Cleanup Old Workflow Runs
 
-#on:
+on:
 #  schedule:
 #    - cron: "0 3 * * *"   # 每天凌晨 3 点执行
   workflow_dispatch:       # 允许手动触发
