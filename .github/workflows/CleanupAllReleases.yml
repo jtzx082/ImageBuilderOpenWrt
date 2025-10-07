@@ -1,0 +1,48 @@
+name: Cleanup All Releases
+
+on:
+  # schedule:
+  #   - cron: "0 3 * * *"   # 已注释：每天凌晨 3 点执行
+  workflow_dispatch:         # 仅支持手动触发
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete all releases
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // 获取所有 release
+            const releases = await github.paginate(
+              github.rest.repos.listReleases,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+              }
+            );
+
+            for (const release of releases) {
+              console.log(`Deleting release ${release.id} (${release.tag_name})`);
+
+              // 删除 release
+              await github.rest.repos.deleteRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id,
+              });
+
+              // 删除对应的 tag（如果存在）
+              try {
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `tags/${release.tag_name}`,
+                });
+                console.log(`Deleted tag ${release.tag_name}`);
+              } catch (err) {
+                console.log(`Tag ${release.tag_name} not found or already deleted`);
+              }
+            }
