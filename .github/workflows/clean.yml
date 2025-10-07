@@ -1,8 +1,8 @@
 name: Cleanup Old Workflow Runs
 
-on:
-  schedule:
-    - cron: "0 3 * * *"   # 每天凌晨 3 点执行
+#on:
+#  schedule:
+#    - cron: "0 3 * * *"   # 每天凌晨 3 点执行
   workflow_dispatch:       # 允许手动触发
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const daysToKeep = 7; // 保留最近 7 天的运行
+            #const daysToKeep = 7; // 保留最近 7 天的运行
             const cutoff = new Date();
             cutoff.setDate(cutoff.getDate() - daysToKeep);
 
