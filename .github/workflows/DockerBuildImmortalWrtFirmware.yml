@@ -40,13 +40,6 @@ jobs:
           cp packages/*.ipk build/packages/ || true
           cp packages.list build/
 
-      # ✅ 生成本地包索引
-      - name: Generate local package index
-        run: |
-          cd build/packages
-          opkg-make-index . > Packages
-          gzip -9c Packages > Packages.gz
-
       - name: Run ImageBuilder in Docker
         run: |
           docker run --rm \
@@ -56,7 +49,11 @@ jobs:
             bash -c "\
               cd /builder && \
               PKGS=\$(tr '\n' ' ' < /builder/packages.list) && \
-              # 添加本地 feed
+              # ✅ 在容器内生成本地包索引
+              if [ -d /builder/packages ] && [ \"\$(ls -A /builder/packages/*.ipk 2>/dev/null)\" ]; then \
+                (cd /builder/packages && opkg-make-index . > Packages && gzip -9c Packages > Packages.gz); \
+              fi && \
+              # ✅ 添加本地 feed
               echo 'src custom file:///builder/packages' >> repositories.conf && \
               ./scripts/feeds update -a && \
               ./scripts/feeds install -a && \
