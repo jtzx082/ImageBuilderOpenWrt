@@ -23,7 +23,6 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
           df -h
 
-      # ✅ 缓存 dl 目录
       - name: Cache dl directory
         uses: actions/cache@v4
         with:
@@ -45,7 +44,7 @@ jobs:
           docker run --rm \
             -v ${{ github.workspace }}/build:/builder \
             -v ${{ github.workspace }}/build/dl:/builder/dl \
-            immortalwrt/imagebuilder:x86-64-openwrt-${{ matrix.version }} \
+            immortalwrt/imagebuilder:${{ matrix.target }}-${{ matrix.subtarget }}-${{ matrix.version }} \
             bash -c "\
               cd /builder && \
               PKGS=\$(tr '\n' ' ' < /builder/packages.list) && \
@@ -55,8 +54,6 @@ jobs:
               fi && \
               # ✅ 添加本地 feed
               echo 'src custom file:///builder/packages' >> repositories.conf && \
-              ./scripts/feeds update -a && \
-              ./scripts/feeds install -a && \
               make image \
                 PACKAGES=\"\$PKGS\" \
                 FILES=/builder/files \
