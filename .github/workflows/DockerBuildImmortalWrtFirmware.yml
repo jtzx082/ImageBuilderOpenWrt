@@ -1,0 +1,97 @@
+name: Docker-Build-ImmortalWrt-Firmware
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        target: [x86]
+        subtarget: [64]
+        rootfs: [1024]
+        version: [24.10.3]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          df -h
+
+      # ✅ 缓存 dl 目录
+      - name: Cache dl directory
+        uses: actions/cache@v4
+        with:
+          path: build/dl
+          key: dl-${{ runner.os }}-${{ matrix.version }}-${{ matrix.target }}-${{ matrix.subtarget }}
+          restore-keys: |
+            dl-${{ runner.os }}-
+
+      - name: Prepare build context
+        run: |
+          mkdir -p build/files/etc/uci-defaults
+          cp uci-custom build/files/etc/uci-defaults/99-custom-network
+          mkdir -p build/packages
+          cp packages/*.ipk build/packages/ || true
+          cp packages.list build/
+
+      - name: Run ImageBuilder in Docker
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/build:/builder \
+            -v ${{ github.workspace }}/build/dl:/builder/dl \
+            immortalwrt/imagebuilder:x86-64-openwrt-${{ matrix.version }} \
+            bash -c "\
+              # 将本地 ipk 仓库加入 repositories.conf
+              echo 'src custom file:///builder/packages' >> repositories.conf && \
+              PKGS=\$(tr '\n' ' ' < /builder/packages.list) && \
+              make image \
+                PACKAGES=\"\$PKGS\" \
+                FILES=/builder/files \
+                EXTRA_IMAGE_NAME=custom \
+                ROOTFS_PARTSIZE=${{ matrix.rootfs }} \
+                -j\$(nproc) \
+                && cp -r bin/targets/* /builder/output"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-${{ matrix.version }}-${{ matrix.target }}-${{ matrix.subtarget }}-rootfs${{ matrix.rootfs }}
+          path: build/output/**
+
+      - name: Generate tag name
+        id: tag
+        run: |
+          DATE=$(date +'%Y%m%d')
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          echo "TAG=auto-${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
+          echo "Generated tag: auto-${DATE}-${SHORT_SHA}"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: "ImmortalWrt Firmware ${{ env.TAG }}"
+          draft: false
+          prerelease: false
+          files: build/output/**
+
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@main
+        with:
+          retain_days: 0
+          keep_minimum_runs: 2
+
+      - name: Remove old Releases
+        uses: dev-drprasad/delete-older-releases@master
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+        with:
+          keep_latest: 3
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
