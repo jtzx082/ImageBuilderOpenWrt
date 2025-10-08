@@ -23,18 +23,6 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
           df -h
 
-      # ✅ 设置 Docker Buildx 并启用缓存
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: docker-${{ runner.os }}-${{ matrix.version }}
-          restore-keys: |
-            docker-${{ runner.os }}-
-
       - name: Pull ImmortalWrt ImageBuilder Docker image
         run: |
           docker pull immortalwrt/imagebuilder:x86-64-openwrt-${{ matrix.version }}
@@ -47,6 +35,14 @@ jobs:
           mkdir -p custom_packages
           cp packages/*.ipk custom_packages/ || true
 
+      - name: Generate local package index
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y opkg-utils
+          cd custom_packages
+          opkg-make-index . > Packages
+          gzip -f Packages
+
       - name: Run ImageBuilder inside Docker
         run: |
           PKGS=$(tr '\n' ' ' < packages.list)
@@ -58,11 +54,6 @@ jobs:
             immortalwrt/imagebuilder:x86-64-openwrt-${{ matrix.version }} \
             /bin/bash -c "\
               set -e && \
-              mkdir -p /tmp/pkgindex && \
-              cp -r /builder/packages/* /tmp/pkgindex/ || true && \
-              cd /tmp/pkgindex && \
-              opkg-make-index . > Packages && gzip -f Packages && \
-              cp -f Packages* /builder/packages/ && \
               cd /builder && \
               make image \
                 PACKAGES=\"\$PKGS\" \
