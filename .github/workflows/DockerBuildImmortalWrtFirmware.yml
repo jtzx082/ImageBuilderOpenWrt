@@ -47,14 +47,13 @@ jobs:
         run: |
           PKGS=$(tr '\n' ' ' < packages.list)
           docker run --rm \
-            -v ${{ github.workspace }}/build_output:/builder/bin \
-            -v ${{ github.workspace }}/custom_files:/builder/files \
-            -v ${{ github.workspace }}/custom_packages:/builder/packages \
-            -v ${{ github.workspace }}/packages.list:/builder/packages.list \
+            -v ${{ github.workspace }}/build_output:/home/build/bin \
+            -v ${{ github.workspace }}/custom_files:/home/build/files \
+            -v ${{ github.workspace }}/custom_packages:/home/build/packages \
+            -v ${{ github.workspace }}/packages.list:/home/build/packages.list \
             immortalwrt/imagebuilder:x86-64-openwrt-${{ matrix.version }} \
             /bin/bash -c "\
               set -e && \
-              cd /builder && \
               make image \
                 PACKAGES=\"\$PKGS\" \
                 FILES=\"files\" \
