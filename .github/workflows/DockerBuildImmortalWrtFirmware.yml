@@ -35,12 +35,12 @@ jobs:
           mkdir -p custom_packages
           cp packages/*.ipk custom_packages/ || true
 
-      - name: Generate local package index
+      - name: Generate local package index (using dpkg-scanpackages)
         run: |
           sudo apt-get update
-          sudo apt-get install -y opkg-utils
+          sudo apt-get install -y dpkg-dev
           cd custom_packages
-          opkg-make-index . > Packages
+          dpkg-scanpackages . /dev/null > Packages
           gzip -f Packages
 
       - name: Run ImageBuilder inside Docker
