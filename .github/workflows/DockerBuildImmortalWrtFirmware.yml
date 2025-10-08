@@ -65,11 +65,25 @@ jobs:
           echo "=== Build output tree ==="
           ls -R build_output || true
 
+      - name: Find firmware files
+        id: find_fw
+        run: |
+          FW_PATH=$(find build_output -type f -name "*.bin" -o -name "*.img" -o -name "*.gz" || true)
+          if [ -z "$FW_PATH" ]; then
+            echo "No firmware files found!"
+            exit 1
+          fi
+          echo "FW_PATHS<<EOF" >> $GITHUB_ENV
+          echo "$FW_PATH" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          echo "Found firmware files:"
+          echo "$FW_PATH"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-${{ matrix.version }}-${{ matrix.target }}-${{ matrix.subtarget }}-rootfs${{ matrix.rootfs }}
-          path: build_output/targets/${{ matrix.target }}/${{ matrix.subtarget }}/*
+          path: ${{ env.FW_PATHS }}
 
       - name: Generate tag name
         id: tag
@@ -86,7 +100,7 @@ jobs:
           name: "ImmortalWrt Firmware ${{ env.TAG }}"
           draft: false
           prerelease: false
-          files: build_output/targets/${{ matrix.target }}/${{ matrix.subtarget }}/*
+          files: ${{ env.FW_PATHS }}
 
       - name: Delete workflow runs
         uses: Mattraks/delete-workflow-runs@main
