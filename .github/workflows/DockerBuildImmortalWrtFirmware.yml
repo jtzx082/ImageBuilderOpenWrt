@@ -1,4 +1,4 @@
-name: Docker-Build-ImmortalWrt-Firmware
+name: Build-ImmortalWrt-Firmware
 
 on:
   workflow_dispatch:
@@ -47,15 +47,13 @@ jobs:
             -v ${{ github.workspace }}/build/dl:/builder/dl \
             immortalwrt/imagebuilder:x86-64-openwrt-${{ matrix.version }} \
             bash -c "\
-              # 将本地 ipk 仓库加入 repositories.conf
-              echo 'src custom file:///builder/packages' >> repositories.conf && \
               PKGS=\$(tr '\n' ' ' < /builder/packages.list) && \
               make image \
                 PACKAGES=\"\$PKGS\" \
                 FILES=/builder/files \
                 EXTRA_IMAGE_NAME=custom \
                 ROOTFS_PARTSIZE=${{ matrix.rootfs }} \
-                -j\$(nproc) \
+                -j$(nproc) \
                 && cp -r bin/targets/* /builder/output"
 
       - name: Upload artifacts
