@@ -9,7 +9,10 @@ jobs:
 
     strategy:
       matrix:
+        target: [x86]
+        subtarget: [64]
         rootfs: [1024]
+        version: [24.10.3]
 
     steps:
       - name: Checkout repository
@@ -20,50 +23,37 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
           df -h
 
-      - name: Cache dl directory
-        uses: actions/cache@v4
-        with:
-          path: build/dl
-          key: dl-${{ runner.os }}-24.10.3-x86-64
-          restore-keys: |
-            dl-${{ runner.os }}-
-
-      - name: Prepare build context
+      - name: Pull ImmortalWrt ImageBuilder Docker image
         run: |
-          mkdir -p build/files/etc/uci-defaults
-          cp uci-custom build/files/etc/uci-defaults/99-custom-network
-          mkdir -p build/packages
-          cp packages/*.ipk build/packages/ || true
-          cp packages.list build/
+          docker pull immortalwrt/imagebuilder:x86-64-openwrt-${{ matrix.version }}
 
-      - name: Run ImageBuilder in Docker
+      - name: Prepare build directories
         run: |
+          mkdir -p build_output
+          mkdir -p custom_files/etc/uci-defaults
+          cp uci-custom custom_files/etc/uci-defaults/99-custom-network
+          mkdir -p custom_packages
+          cp packages/*.ipk custom_packages/ || true
+
+      - name: Run ImageBuilder inside Docker
+        run: |
+          PKGS=$(tr '\n' ' ' < packages.list)
           docker run --rm \
-            -v ${{ github.workspace }}/build:/builder \
-            -v ${{ github.workspace }}/build/dl:/builder/dl \
-            immortalwrt/imagebuilder:x86-64-openwrt-24.10.3 \
-            bash -c "\
-              cd /builder && \
-              PKGS=\$(tr '\n' ' ' < /builder/packages.list) && \
-              # ✅ 在容器内生成本地包索引
-              if [ -d /builder/packages ] && [ \"\$(ls -A /builder/packages/*.ipk 2>/dev/null)\" ]; then \
-                (cd /builder/packages && opkg-make-index . > Packages && gzip -9c Packages > Packages.gz); \
-              fi && \
-              # ✅ 添加本地 feed
-              echo 'src custom file:///builder/packages' >> repositories.conf && \
-              make image \
-                PACKAGES=\"\$PKGS\" \
-                FILES=/builder/files \
-                EXTRA_IMAGE_NAME=custom \
-                ROOTFS_PARTSIZE=${{ matrix.rootfs }} \
-                -j\$(nproc) && \
-              cp -r bin/targets/* /builder/output"
+            -v ${{ github.workspace }}/build_output:/builder/bin \
+            -v ${{ github.workspace }}/custom_files:/builder/files \
+            -v ${{ github.workspace }}/custom_packages:/builder/packages \
+            -v ${{ github.workspace }}/packages.list:/builder/packages.list \
+            immortalwrt/imagebuilder:x86-64-openwrt-${{ matrix.version }} \
+            make image \
+              PACKAGES="$PKGS" \
+              FILES="files" \
+              ROOTFS_PARTSIZE=${{ matrix.rootfs }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: immortalwrt-24.10.3-x86-64-rootfs${{ matrix.rootfs }}
-          path: build/output/**
+          name: immortalwrt-${{ matrix.version }}-${{ matrix.target }}-${{ matrix.subtarget }}-rootfs${{ matrix.rootfs }}
+          path: build_output/targets/${{ matrix.target }}/${{ matrix.subtarget }}/*
 
       - name: Generate tag name
         id: tag
@@ -80,7 +70,7 @@ jobs:
           name: "ImmortalWrt Firmware ${{ env.TAG }}"
           draft: false
           prerelease: false
-          files: build/output/**
+          files: build_output/targets/${{ matrix.target }}/${{ matrix.subtarget }}/*
 
       - name: Delete workflow runs
         uses: Mattraks/delete-workflow-runs@main
