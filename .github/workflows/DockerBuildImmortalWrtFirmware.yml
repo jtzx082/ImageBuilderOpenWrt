@@ -40,6 +40,13 @@ jobs:
           cp packages/*.ipk build/packages/ || true
           cp packages.list build/
 
+      # ✅ 生成本地包索引
+      - name: Generate local package index
+        run: |
+          cd build/packages
+          opkg-make-index . > Packages
+          gzip -9c Packages > Packages.gz
+
       - name: Run ImageBuilder in Docker
         run: |
           docker run --rm \
@@ -47,14 +54,19 @@ jobs:
             -v ${{ github.workspace }}/build/dl:/builder/dl \
             immortalwrt/imagebuilder:x86-64-openwrt-${{ matrix.version }} \
             bash -c "\
+              cd /builder && \
               PKGS=\$(tr '\n' ' ' < /builder/packages.list) && \
+              # 添加本地 feed
+              echo 'src custom file:///builder/packages' >> repositories.conf && \
+              ./scripts/feeds update -a && \
+              ./scripts/feeds install -a && \
               make image \
                 PACKAGES=\"\$PKGS\" \
                 FILES=/builder/files \
                 EXTRA_IMAGE_NAME=custom \
                 ROOTFS_PARTSIZE=${{ matrix.rootfs }} \
-                -j$(nproc) \
-                && cp -r bin/targets/* /builder/output"
+                -j\$(nproc) && \
+              cp -r bin/targets/* /builder/output"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
