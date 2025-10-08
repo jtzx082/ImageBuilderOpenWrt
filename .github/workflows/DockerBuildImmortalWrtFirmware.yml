@@ -9,10 +9,7 @@ jobs:
 
     strategy:
       matrix:
-        target: [x86]
-        subtarget: [64]
         rootfs: [1024]
-        version: [24.10.3]
 
     steps:
       - name: Checkout repository
@@ -27,7 +24,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/dl
-          key: dl-${{ runner.os }}-${{ matrix.version }}-${{ matrix.target }}-${{ matrix.subtarget }}
+          key: dl-${{ runner.os }}-24.10.3-x86-64
           restore-keys: |
             dl-${{ runner.os }}-
 
@@ -44,7 +41,7 @@ jobs:
           docker run --rm \
             -v ${{ github.workspace }}/build:/builder \
             -v ${{ github.workspace }}/build/dl:/builder/dl \
-            immortalwrt/imagebuilder:${{ matrix.target }}-${{ matrix.subtarget }}-${{ matrix.version }} \
+            immortalwrt/imagebuilder:x86-64-openwrt-24.10.3 \
             bash -c "\
               cd /builder && \
               PKGS=\$(tr '\n' ' ' < /builder/packages.list) && \
@@ -65,7 +62,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: immortalwrt-${{ matrix.version }}-${{ matrix.target }}-${{ matrix.subtarget }}-rootfs${{ matrix.rootfs }}
+          name: immortalwrt-24.10.3-x86-64-rootfs${{ matrix.rootfs }}
           path: build/output/**
 
       - name: Generate tag name
