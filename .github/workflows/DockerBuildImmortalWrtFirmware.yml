@@ -47,7 +47,7 @@ jobs:
         run: |
           PKGS=$(tr '\n' ' ' < packages.list)
           docker run --rm \
-            -v ${{ github.workspace }}/build_output:/home/build/bin \
+            -v ${{ github.workspace }}/build_output:/home/build/bin/targets \
             -v ${{ github.workspace }}/custom_files:/home/build/files \
             -v ${{ github.workspace }}/custom_packages:/home/build/packages \
             -v ${{ github.workspace }}/packages.list:/home/build/packages.list \
@@ -68,7 +68,7 @@ jobs:
       - name: Find firmware files
         id: find_fw
         run: |
-          FW_PATH=$(find build_output -type f -name "*.bin" -o -name "*.img" -o -name "*.gz" || true)
+          FW_PATH=$(find build_output -type f \( -name "*.bin" -o -name "*.img" -o -name "*.tar.gz" -o -name "*.gz" \) || true)
           if [ -z "$FW_PATH" ]; then
             echo "No firmware files found!"
             exit 1
