@@ -1,4 +1,4 @@
-name: Build-ImmortalWrt-Firmware
+name: Docker-Build-ImmortalWrt-Firmware
 
 on:
   workflow_dispatch:
