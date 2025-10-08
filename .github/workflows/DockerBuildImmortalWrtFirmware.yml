@@ -44,10 +44,14 @@ jobs:
             -v ${{ github.workspace }}/custom_packages:/builder/packages \
             -v ${{ github.workspace }}/packages.list:/builder/packages.list \
             immortalwrt/imagebuilder:x86-64-openwrt-${{ matrix.version }} \
-            make image \
-              PACKAGES="$PKGS" \
-              FILES="files" \
-              ROOTFS_PARTSIZE=${{ matrix.rootfs }}
+            /bin/bash -c "\
+              cd /builder && \
+              cd packages && opkg-make-index . > Packages && gzip -f Packages && cd .. && \
+              make image \
+                PACKAGES=\"\$PKGS\" \
+                FILES=\"files\" \
+                ROOTFS_PARTSIZE=${{ matrix.rootfs }} \
+            "
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
