@@ -1,11 +1,55 @@
-name: Docker-Build-ImmortalWrt-Firmware
+name: Build-ImmortalWrt-Firmware
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  # 先编译 nikki 相关包
+  build-nikki:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          df -h
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev gawk git wget unzip \
+            file libssl-dev python3 zstd qemu-utils
+
+      - name: Download SDK
+        run: |
+          wget https://downloads.immortalwrt.org/releases/24.10.3/targets/x86/64/immortalwrt-sdk-24.10.3-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          tar -xf immortalwrt-sdk-24.10.3-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          mv immortalwrt-sdk-24.10.3-x86-64_gcc-12.3.0_musl.Linux-x86_64 sdk
+
+      - name: Build nikki packages
+        working-directory: sdk
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install nikki luci-app-nikki luci-i18n-nikki-zh-cn
+          make defconfig
+          make package/nikki/compile V=s
+          make package/luci-app-nikki/compile V=s
+          make package/luci-i18n-nikki-zh-cn/compile V=s
+          mkdir -p ../nikki-ipks
+          find bin/packages/ -name "*nikki*.ipk" -exec cp {} ../nikki-ipks/ \;
+
+      - name: Upload nikki ipks
+        uses: actions/upload-artifact@v4
+        with:
+          name: nikki-ipks
+          path: nikki-ipks/*
+
+  # 再用 Docker ImageBuilder 构建固件
+  build-firmware:
+    runs-on: ubuntu-latest
+    needs: build-nikki
 
     strategy:
       matrix:
@@ -23,7 +67,6 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
           df -h
 
-      # ✅ 缓存 dl 目录
       - name: Cache dl directory
         uses: actions/cache@v4
         with:
@@ -32,11 +75,16 @@ jobs:
           restore-keys: |
             dl-${{ runner.os }}-
 
+      - name: Download nikki ipks
+        uses: actions/download-artifact@v4
+        with:
+          name: nikki-ipks
+          path: build/packages
+
       - name: Prepare build context
         run: |
           mkdir -p build/files/etc/uci-defaults
           cp uci-custom build/files/etc/uci-defaults/99-custom-network
-          mkdir -p build/packages
           cp packages/*.ipk build/packages/ || true
           cp packages.list build/
 
@@ -53,7 +101,7 @@ jobs:
                 FILES=/builder/files \
                 EXTRA_IMAGE_NAME=custom \
                 ROOTFS_PARTSIZE=${{ matrix.rootfs }} \
-                -j$(nproc) \
+                -j\$(nproc) \
                 && cp -r bin/targets/* /builder/output"
 
       - name: Upload artifacts
