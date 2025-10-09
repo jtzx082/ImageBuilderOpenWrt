@@ -55,9 +55,8 @@ jobs:
           # 后端程序
           cp -r src-packages/net/ddns-go openwrt-sdk/package/
 
-          # LuCI 前端和中文翻译
+          # LuCI 前端
           cp -r src-luci/applications/luci-app-ddns-go openwrt-sdk/package/
-          cp -r src-luci/applications/luci-i18n-ddns-go-zh-cn openwrt-sdk/package/
 
       - name: Update feeds and defconfig
         working-directory: openwrt-sdk
@@ -71,7 +70,6 @@ jobs:
         run: |
           make package/ddns-go/compile | tee build-ddns-go.log
           make package/luci-app-ddns-go/compile | tee -a build-ddns-go.log
-          make package/luci-i18n-ddns-go-zh-cn/compile | tee -a build-ddns-go.log
 
       - name: Collect built packages
         id: collect
