@@ -38,29 +38,11 @@ jobs:
           tar --use-compress-program=unzstd -xf ${SDK_ARCHIVE}
           mv ${SDK_DIRNAME} openwrt-sdk
 
-      - name: Fetch luci source
+      - name: Add immortalwrt feeds
+        working-directory: openwrt-sdk
         run: |
-          git clone https://github.com/immortalwrt/luci.git src-luci
-          cd src-luci
-          git checkout "${{ github.event.inputs.luci_ref }}"
-
-      - name: Fetch packages source
-        run: |
-          git clone https://github.com/immortalwrt/packages.git src-packages
-          cd src-packages
-          git checkout "${{ github.event.inputs.packages_ref }}"
-
-      - name: Place ddns-go packages into SDK
-        run: |
-          # 后端程序
-          cp -r src-packages/net/ddns-go openwrt-sdk/package/
-
-          # Go 工具链支持
-          mkdir -p openwrt-sdk/package/lang
-          cp -r src-packages/lang/golang openwrt-sdk/package/lang/
-
-          # LuCI 前端
-          cp -r src-luci/applications/luci-app-ddns-go openwrt-sdk/package/
+          echo "src-git luci https://github.com/immortalwrt/luci.git;${{ github.event.inputs.luci_ref }}" >> feeds.conf.default
+          echo "src-git packages https://github.com/immortalwrt/packages.git;${{ github.event.inputs.packages_ref }}" >> feeds.conf.default
 
       - name: Update feeds and defconfig
         working-directory: openwrt-sdk
@@ -74,10 +56,8 @@ jobs:
         run: |
           # 先编译 Go 工具链
           make package/golang/host/compile V=s
-          # 下载并编译 ddns-go
-          make package/ddns-go/download V=s
+          # 编译 ddns-go 及 LuCI 前端
           make package/ddns-go/compile V=s | tee build-ddns-go.log
-          # 编译 LuCI 前端（会自动生成 luci-i18n-ddns-go-zh-cn）
           make package/luci-app-ddns-go/compile V=s | tee -a build-ddns-go.log
 
       - name: Collect built packages
