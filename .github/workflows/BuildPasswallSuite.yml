@@ -1,0 +1,96 @@
+name: Build Passwall Suite (x86-64)
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 每天 UTC 时间 06:00 运行
+  workflow_dispatch:
+    inputs:
+      passwall_ref:
+        description: 'passwall commit/branch/tag to build (default: main)'
+        required: false
+        default: 'main'
+
+jobs:
+  build-passwall-suite:
+    runs-on: ubuntu-22.04
+
+    env:
+      OPENWRT_VERSION: 24.10.3
+      TARGET_DIR: x86/64
+      ARCH_DIR: x86_64
+      SDK_DIRNAME: openwrt-sdk-24.10.3-x86-64_gcc-13.3.0_musl.Linux-x86_64
+      SDK_ARCHIVE: openwrt-sdk-24.10.3-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+
+    steps:
+      - name: Prepare environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+            gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip \
+            zlib1g-dev file wget zstd
+
+      - name: Download OpenWrt SDK
+        run: |
+          wget https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET_DIR}/${SDK_ARCHIVE}
+          tar --use-compress-program=unzstd -xf ${SDK_ARCHIVE}
+          mv ${SDK_DIRNAME} openwrt-sdk
+
+      - name: Fetch passwall source
+        run: |
+          git clone https://github.com/xiaorouji/openwrt-passwall.git src-passwall
+          cd src-passwall
+          git checkout "${{ github.event.inputs.passwall_ref }}"
+
+      - name: Place passwall package into SDK
+        run: |
+          # passwall 仓库包含多个 package 和 luci-app-passwall
+          cp -r src-passwall openwrt-sdk/package/passwall
+
+      - name: Update feeds and defconfig
+        working-directory: openwrt-sdk
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          make defconfig
+
+      - name: Build passwall and dependencies
+        working-directory: openwrt-sdk
+        run: |
+          # 编译 passwall 及其依赖
+          make package/passwall/compile | tee build-passwall.log
+          make package/luci-app-passwall/compile | tee -a build-passwall.log
+
+      - name: Collect built packages
+        id: collect
+        working-directory: openwrt-sdk
+        run: |
+          mkdir -p ../release-ipks
+          # 收集 passwall 相关的所有 ipk
+          find bin/packages/${ARCH_DIR} -type f -name 'passwall*.ipk' -exec cp {} ../release-ipks/ \;
+          find bin/packages/${ARCH_DIR} -type f -name 'luci-app-passwall*.ipk' -exec cp {} ../release-ipks/ \;
+          find bin/packages/${ARCH_DIR} -type f -name 'luci-i18n-passwall-*.ipk' -exec cp {} ../release-ipks/ \;
+          echo "release_tag=passwall-${{ env.OPENWRT_VERSION }}-${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: openwrt-sdk/build-passwall.log
+
+      - name: Upload artifacts (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: passwall-x86_64-ipk
+          path: release-ipks/*.ipk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.collect.outputs.release_tag }}
+          name: Passwall Suite for OpenWrt ${{ env.OPENWRT_VERSION }} (${{ github.sha }})
+          draft: false
+          prerelease: false
+          files: release-ipks/*.ipk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
