@@ -55,6 +55,10 @@ jobs:
           # 后端程序
           cp -r src-packages/net/ddns-go openwrt-sdk/package/
 
+          # Go 工具链支持
+          mkdir -p openwrt-sdk/package/lang
+          cp -r src-packages/lang/golang openwrt-sdk/package/lang/
+
           # LuCI 前端
           cp -r src-luci/applications/luci-app-ddns-go openwrt-sdk/package/
 
@@ -64,14 +68,16 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           make defconfig
-          # 确保 Go 工具链可用
-          make package/golang/host/compile V=s
 
       - name: Build ddns-go packages
         working-directory: openwrt-sdk
         run: |
+          # 先编译 Go 工具链
+          make package/golang/host/compile V=s
+          # 下载并编译 ddns-go
           make package/ddns-go/download V=s
           make package/ddns-go/compile V=s | tee build-ddns-go.log
+          # 编译 LuCI 前端（会自动生成 luci-i18n-ddns-go-zh-cn）
           make package/luci-app-ddns-go/compile V=s | tee -a build-ddns-go.log
 
       - name: Collect built packages
