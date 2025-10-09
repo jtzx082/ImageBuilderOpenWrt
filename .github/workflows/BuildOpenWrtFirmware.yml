@@ -83,7 +83,7 @@ jobs:
       - name: Build firmware
         working-directory: imagebuilder
         run: |
-          PKGS=$(tr '\n' ' ' < ../packages.list)
+          PKGS=$(tr '\n' ' ' < ../packages1.list)
           make image \
             PACKAGES="$PKGS" \
             FILES="files" \
