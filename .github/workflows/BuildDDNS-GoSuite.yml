@@ -3,10 +3,6 @@ name: Build DDNS-Go Suite (x86-64)
 on:
   workflow_dispatch:
     inputs:
-      luci_ref:
-        description: 'luci commit/branch/tag to build (default: master)'
-        required: false
-        default: 'master'
       packages_ref:
         description: 'packages commit/branch/tag to build (default: master)'
         required: false
@@ -38,11 +34,10 @@ jobs:
           tar --use-compress-program=unzstd -xf ${SDK_ARCHIVE}
           mv ${SDK_DIRNAME} openwrt-sdk
 
-      - name: Add immortalwrt feeds
+      - name: Add immortalwrt packages feed
         working-directory: openwrt-sdk
         run: |
-          echo "src-git luci https://github.com/immortalwrt/luci.git;${{ github.event.inputs.luci_ref }}" >> feeds.conf.default
-          echo "src-git packages https://github.com/immortalwrt/packages.git;${{ github.event.inputs.packages_ref }}" >> feeds.conf.default
+          echo "src-git immortalwrt_packages https://github.com/immortalwrt/packages.git;${{ github.event.inputs.packages_ref }}" >> feeds.conf.default
 
       - name: Update feeds and defconfig
         working-directory: openwrt-sdk
