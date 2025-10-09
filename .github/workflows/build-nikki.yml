@@ -2,6 +2,8 @@ name: Build Nikki Suite (x86-64)
 
 on:
   workflow_dispatch:
+   schedule:
+     - cron: "0 19 * * *"   # 每天 UTC 19 点触发，相当于北京时间次日凌晨 3 点
     inputs:
       nikki_ref:
         description: 'OpenWrt-nikki.git commit/branch/tag to build'
