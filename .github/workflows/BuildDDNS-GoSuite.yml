@@ -7,6 +7,10 @@ on:
         description: 'luci commit/branch/tag to build (default: master)'
         required: false
         default: 'master'
+      packages_ref:
+        description: 'packages commit/branch/tag to build (default: master)'
+        required: false
+        default: 'master'
 
 jobs:
   build-ddnsgo-suite:
@@ -40,11 +44,19 @@ jobs:
           cd src-luci
           git checkout "${{ github.event.inputs.luci_ref }}"
 
+      - name: Fetch packages source
+        run: |
+          git clone https://github.com/immortalwrt/packages.git src-packages
+          cd src-packages
+          git checkout "${{ github.event.inputs.packages_ref }}"
+
       - name: Place ddns-go packages into SDK
         run: |
-          mkdir -p openwrt-sdk/package/ddns-go
+          # 后端程序
+          cp -r src-packages/net/ddns-go openwrt-sdk/package/
+
+          # LuCI 前端和中文翻译
           cp -r src-luci/applications/luci-app-ddns-go openwrt-sdk/package/
-          cp -r src-luci/applications/ddns-go openwrt-sdk/package/
           cp -r src-luci/applications/luci-i18n-ddns-go-zh-cn openwrt-sdk/package/
 
       - name: Update feeds and defconfig
