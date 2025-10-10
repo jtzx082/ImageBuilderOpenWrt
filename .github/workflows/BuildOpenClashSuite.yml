@@ -40,7 +40,7 @@ jobs:
           tar --use-compress-program=unzstd -xf ${SDK_ARCHIVE}
           mv ${SDK_DIRNAME} openwrt-sdk
 
-      - name: Replace luci feed with ImmortalWrt version
+      - name: Replace feeds with ImmortalWrt + OpenClash
         working-directory: openwrt-sdk
         run: |
           # 注释掉 SDK 自带的 luci feed
@@ -48,6 +48,8 @@ jobs:
           # 添加 ImmortalWrt luci 和 packages
           echo "src-git luci https://github.com/immortalwrt/luci.git;${{ github.event.inputs.luci_ref }}" >> feeds.conf.default
           echo "src-git immortalwrt_packages https://github.com/immortalwrt/packages.git;${{ github.event.inputs.packages_ref }}" >> feeds.conf.default
+          # 添加 OpenClash feed
+          echo "src-git openclash https://github.com/vernesong/OpenClash.git" >> feeds.conf.default
 
       - name: Update feeds and defconfig
         working-directory: openwrt-sdk
@@ -59,16 +61,21 @@ jobs:
       - name: Build OpenClash packages
         working-directory: openwrt-sdk
         run: |
-          # 编译 luci-app-openclash
           make package/luci-app-openclash/compile V=s | tee build-openclash.log
+
+      - name: Debug package output
+        working-directory: openwrt-sdk
+        run: |
+          echo "=== Built IPKs ==="
+          find bin/packages -type f -name '*.ipk'
 
       - name: Collect built packages
         id: collect
         working-directory: openwrt-sdk
         run: |
           mkdir -p ../release-ipks
-          find bin/packages/${ARCH_DIR} -type f -name 'luci-app-openclash*.ipk' -exec cp {} ../release-ipks/ \;
-          find bin/packages/${ARCH_DIR} -type f -name 'luci-i18n-openclash-zh-cn*.ipk' -exec cp {} ../release-ipks/ \;
+          find bin/packages -type f -name 'luci-app-openclash*.ipk' -exec cp {} ../release-ipks/ \;
+          find bin/packages -type f -name 'luci-i18n-openclash-zh-cn*.ipk' -exec cp {} ../release-ipks/ \;
           echo "release_tag=openclash-${{ env.OPENWRT_VERSION }}-${{ github.sha }}" >> $GITHUB_OUTPUT
 
       - name: Upload build log
