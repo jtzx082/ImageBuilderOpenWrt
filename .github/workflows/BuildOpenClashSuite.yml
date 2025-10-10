@@ -36,11 +36,14 @@ jobs:
           tar --use-compress-program=unzstd -xf ${SDK_ARCHIVE}
           mv ${SDK_DIRNAME} openwrt-sdk
 
-      - name: Fetch OpenClash source
+      - name: Fetch OpenClash source (sparse)
         run: |
-          git clone https://github.com/vernesong/OpenClash.git src-openclash
+          git init src-openclash
           cd src-openclash
-          git checkout "${{ github.event.inputs.openclash_ref }}"
+          git remote add origin https://github.com/vernesong/OpenClash.git
+          git config core.sparseCheckout true
+          echo "luci-app-openclash" >> .git/info/sparse-checkout
+          git pull --depth=1 origin "${{ github.event.inputs.openclash_ref }}"
 
       - name: Place OpenClash package into SDK
         run: |
