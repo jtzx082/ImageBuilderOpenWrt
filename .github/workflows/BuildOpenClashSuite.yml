@@ -66,6 +66,8 @@ jobs:
         working-directory: openwrt-sdk
         run: |
           make package/luci-app-openclash/compile V=s | tee build-openclash.log
+          # 如果日志为空或编译失败则退出
+          test -s build-openclash.log || exit 1
 
       - name: Collect built packages
         id: collect
@@ -73,6 +75,8 @@ jobs:
         run: |
           mkdir -p ../release-ipks
           find bin/packages -type f -name 'luci-app-openclash*.ipk' -exec cp {} ../release-ipks/ \;
+          find bin/packages -type f -name 'luci-i18n-openclash-*.ipk' -exec cp {} ../release-ipks/ \;
+          ls -lh ../release-ipks || true
           echo "release_tag=openclash-${{ env.OPENWRT_VERSION }}-${{ github.sha }}" >> $GITHUB_OUTPUT
 
       - name: Upload build log
