@@ -1,9 +1,9 @@
-autocore
-automount
+-autocore
+-automount
 base-files
 block-mount
 ca-bundle
-default-settings-chn
+-default-settings-chn
 dnsmasq
 dropbear
 fdisk
@@ -36,7 +36,7 @@ kmod-usb-net
 kmod-usb-net-asix
 kmod-usb-net-asix-ax88179
 kmod-usb-net-rtl8150
-kmod-usb-net-rtl8152-vendor
+-kmod-usb-net-rtl8152-vendor
 kmod-vmxnet3
 libc
 libgcc
