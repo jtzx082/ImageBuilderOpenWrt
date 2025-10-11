@@ -1,8 +1,8 @@
 name: Build Passwall Suite (x86-64)
 
 on:
-  schedule:
-      - cron: '0 22 * * *'   # 每天 UTC 22:00 = 北京时间次日 06:00
+  #schedule:
+  #    - cron: '0 22 * * *'   # 每天 UTC 22:00 = 北京时间次日 06:00
   workflow_dispatch:
     inputs:
       passwall_ref:
