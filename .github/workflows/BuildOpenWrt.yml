@@ -139,8 +139,11 @@ jobs:
           CONFIG_PACKAGE_dropbear=y
           CONFIG_PACKAGE_openssh-sftp-server=y
       run: |
-        make defconfig
-        echo "${CUSTOM_CONFIG}" >> .config
+        # 从一个干净的状态开始
+        rm -f .config .config.old
+        # 将自定义配置写入新的 .config 文件
+        echo "${CUSTOM_CONFIG}" > .config
+        # 运行 defconfig 来扩展、验证和设置默认值
         make defconfig
 
     # 步骤 9: 下载编译软件包
