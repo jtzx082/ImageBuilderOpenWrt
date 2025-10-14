@@ -99,18 +99,23 @@ jobs:
     - name: Generate .config
       working-directory: ./openwrt
       run: |
-        # 首先，生成一个适用于目标架构的默认、有效的配置文件
-        make defconfig
+        # 从一个干净的状态开始
+        rm -f .config .config.old
 
-        # 然后，将自定义的软件包选项追加到这个默认配置文件中
-        cat >> .config <<'EOF'
+        # 使用 here-document 将所有必需的配置（目标平台和自定义包）一次性写入 .config 文件
+        cat > .config <<'EOF'
+        # --- Target System ---
+        CONFIG_TARGET_x86=y
+        CONFIG_TARGET_x86_64=y
+        CONFIG_TARGET_x86_64_Generic=y
+        CONFIG_TARGET_ROOTFS_PARTSIZE=1024
 
         # --- Build options ---
         CONFIG_CCACHE=y
-        # --- Target System ---
-        CONFIG_TARGET_ROOTFS_PARTSIZE=1024
+        
         # --- Base system ---
         CONFIG_PACKAGE_bash=y
+
         # --- Kernel modules (for VM compatibility) ---
         CONFIG_PACKAGE_kmod-fs-ext4=y
         CONFIG_PACKAGE_kmod-usb-core=y
@@ -119,30 +124,35 @@ jobs:
         CONFIG_PACKAGE_kmod-usb-hid=y
         CONFIG_PACKAGE_kmod-e1000=y
         CONFIG_PACKAGE_kmod-vmxnet3=y
+        
         # --- Network ---
         CONFIG_PACKAGE_dnsmasq=n
         CONFIG_PACKAGE_dnsmasq-full=y
         CONFIG_PACKAGE_firewall4=y
         CONFIG_PACKAGE_iptables-nft=y
+        
         # --- LuCI ---
         CONFIG_PACKAGE_luci=y
         CONFIG_PACKAGE_uhttpd=y
         CONFIG_PACKAGE_luci-theme-bootstrap=y
         CONFIG_PACKAGE_luci-theme-openwrt=y
+
         # --- Applications ---
         CONFIG_PACKAGE_luci-app-ttyd=y
         CONFIG_PACKAGE_nikki=y
         CONFIG_PACKAGE_luci-app-nikki=y
         CONFIG_PACKAGE_ddns-go=y
         CONFIG_PACKAGE_luci-app-ddns-go=y
+
         # --- Utilities ---
         CONFIG_PACKAGE_acpid=y
+
         # --- Services ---
         CONFIG_PACKAGE_dropbear=y
         CONFIG_PACKAGE_openssh-sftp-server=y
         EOF
 
-        # 再次运行 defconfig，让系统根据追加的选项自动解决依赖关系并最终确定配置
+        # 运行 defconfig 来扩展、验证和设置所有必需的默认值
         make defconfig
 
     # 步骤 9: 下载编译软件包
