@@ -6,8 +6,8 @@ on:
   # 允许手动从 Actions 页面触发
   workflow_dispatch:
   # 当 main 分支有 push 操作时触发
-  push:
-    branches:
+#  push:
+#    branches:
       - main
 
 # 环境变量设置
