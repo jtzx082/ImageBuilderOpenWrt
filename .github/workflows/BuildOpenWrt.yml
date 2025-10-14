@@ -98,51 +98,50 @@ jobs:
     # 步骤 8: 生成编译配置文件 (.config)
     - name: Generate .config
       working-directory: ./openwrt
-      env:
-        CUSTOM_CONFIG: |
-          # --- Build options ---
-          CONFIG_CCACHE=y
-          # --- Target System ---
-          CONFIG_TARGET_x86=y
-          CONFIG_TARGET_x86_64=y
-          CONFIG_TARGET_x86_64_Generic=y
-          CONFIG_TARGET_ROOTFS_PARTSIZE=1024
-          # --- Base system ---
-          CONFIG_PACKAGE_bash=y
-          # --- Kernel modules (for VM compatibility) ---
-          CONFIG_PACKAGE_kmod-fs-ext4=y
-          CONFIG_PACKAGE_kmod-usb-core=y
-          CONFIG_PACKAGE_kmod-usb2=y
-          CONFIG_PACKAGE_kmod-usb3=y
-          CONFIG_PACKAGE_kmod-usb-hid=y
-          CONFIG_PACKAGE_kmod-e1000=y
-          CONFIG_PACKAGE_kmod-vmxnet3=y
-          # --- Network ---
-          CONFIG_PACKAGE_dnsmasq=n
-          CONFIG_PACKAGE_dnsmasq-full=y
-          CONFIG_PACKAGE_firewall4=y
-          CONFIG_PACKAGE_iptables-nft=y
-          # --- LuCI ---
-          CONFIG_PACKAGE_luci=y
-          CONFIG_PACKAGE_uhttpd=y
-          CONFIG_PACKAGE_luci-theme-bootstrap=y
-          CONFIG_PACKAGE_luci-theme-openwrt=y
-          # --- Applications ---
-          CONFIG_PACKAGE_luci-app-ttyd=y
-          CONFIG_PACKAGE_nikki=y
-          CONFIG_PACKAGE_luci-app-nikki=y
-          CONFIG_PACKAGE_ddns-go=y
-          CONFIG_PACKAGE_luci-app-ddns-go=y
-          # --- Utilities ---
-          CONFIG_PACKAGE_acpid=y
-          # --- Services ---
-          CONFIG_PACKAGE_dropbear=y
-          CONFIG_PACKAGE_openssh-sftp-server=y
       run: |
         # 从一个干净的状态开始
         rm -f .config .config.old
-        # 将自定义配置写入新的 .config 文件
-        echo "${CUSTOM_CONFIG}" > .config
+        # 使用 here-document 直接将配置写入 .config 文件，以避免格式问题
+        cat > .config <<'EOF'
+        # --- Build options ---
+        CONFIG_CCACHE=y
+        # --- Target System ---
+        CONFIG_TARGET_x86=y
+        CONFIG_TARGET_x86_64=y
+        CONFIG_TARGET_x86_64_Generic=y
+        CONFIG_TARGET_ROOTFS_PARTSIZE=1024
+        # --- Base system ---
+        CONFIG_PACKAGE_bash=y
+        # --- Kernel modules (for VM compatibility) ---
+        CONFIG_PACKAGE_kmod-fs-ext4=y
+        CONFIG_PACKAGE_kmod-usb-core=y
+        CONFIG_PACKAGE_kmod-usb2=y
+        CONFIG_PACKAGE_kmod-usb3=y
+        CONFIG_PACKAGE_kmod-usb-hid=y
+        CONFIG_PACKAGE_kmod-e1000=y
+        CONFIG_PACKAGE_kmod-vmxnet3=y
+        # --- Network ---
+        CONFIG_PACKAGE_dnsmasq=n
+        CONFIG_PACKAGE_dnsmasq-full=y
+        CONFIG_PACKAGE_firewall4=y
+        CONFIG_PACKAGE_iptables-nft=y
+        # --- LuCI ---
+        CONFIG_PACKAGE_luci=y
+        CONFIG_PACKAGE_uhttpd=y
+        CONFIG_PACKAGE_luci-theme-bootstrap=y
+        CONFIG_PACKAGE_luci-theme-openwrt=y
+        # --- Applications ---
+        CONFIG_PACKAGE_luci-app-ttyd=y
+        CONFIG_PACKAGE_nikki=y
+        CONFIG_PACKAGE_luci-app-nikki=y
+        CONFIG_PACKAGE_ddns-go=y
+        CONFIG_PACKAGE_luci-app-ddns-go=y
+        # --- Utilities ---
+        CONFIG_PACKAGE_acpid=y
+        # --- Services ---
+        CONFIG_PACKAGE_dropbear=y
+        CONFIG_PACKAGE_openssh-sftp-server=y
+        EOF
         # 运行 defconfig 来扩展、验证和设置默认值
         make defconfig
 
