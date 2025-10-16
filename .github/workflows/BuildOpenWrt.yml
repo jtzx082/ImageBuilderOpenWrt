@@ -35,11 +35,11 @@ jobs:
     steps:
       # 步骤 1: 检出当前仓库代码
       # 目的是为了能访问仓库中的 openwrt_files 文件夹
-      - name: 1/12 Checkout Repository
+      - name: 1/13 Checkout Repository
         uses: actions/checkout@v4
 
       # 步骤 2: 清理环境、更新系统并安装编译依赖
-      - name: 2/12 Install Dependencies
+      - name: 2/13 Install Dependencies
         run: |
           echo ">>> Cleaning cache, updating system and installing dependencies..."
           sudo apt-get clean
@@ -49,9 +49,21 @@ jobs:
               python3-docutils python3-pyelftools python3-setuptools \
               rsync subversion unzip zlib1g-dev wget xsltproc file ccache
 
-      # 步骤 3: 配置 ccache 编译缓存
+      # 步骤 3: 释放磁盘空间
+      # 删除不需要的预装软件以获得更多编译空间
+      - name: 3/13 Free Up Disk Space
+        run: |
+          echo ">>> Freeing up disk space on the runner..."
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf $AGENT_TOOLSDIRECTORY
+          echo "  -> Space available after cleanup:"
+          df -h
+
+      # 步骤 4: 配置 ccache 编译缓存
       # 使用 actions/cache 来缓存 ccache 目录，大幅提升后续编译速度
-      - name: 3/12 Configure ccache
+      - name: 4/13 Configure ccache
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
@@ -69,24 +81,24 @@ jobs:
           echo "  -> ccache configured, current cache size:"
           ccache -s
 
-      # 步骤 4: 克隆指定版本的 OpenWrt 源码
-      - name: 4/12 Clone OpenWrt Source
+      # 步骤 5: 克隆指定版本的 OpenWrt 源码
+      - name: 5/13 Clone OpenWrt Source
         run: |
           echo ">>> Cloning OpenWrt branch (${{ env.OPENWRT_BRANCH }})..."
           git clone --depth 1 --branch ${{ env.OPENWRT_BRANCH }} ${{ env.OPENWRT_REPO }} ${{ env.OPENWRT_DIR }}
           cd ${{ env.OPENWRT_DIR }}
           echo "  -> Current branch: $(git rev-parse --abbrev-ref HEAD)"
 
-      # 步骤 5: 添加自定义 Feeds 源
-      - name: 5/12 Add Custom Feeds
+      # 步骤 6: 添加自定义 Feeds 源
+      - name: 6/13 Add Custom Feeds
         working-directory: ${{ env.OPENWRT_DIR }}
         run: |
           echo ">>> Adding custom Feeds..."
           echo "src-git nikki ${{ env.NIKKI_FEED_URL }}" >> feeds.conf.default
           echo "src-git ddnsgo ${{ env.DDNSGO_FEED_URL }}" >> feeds.conf.default
 
-      # 步骤 6: 切换至 GitHub 镜像并更新 Feeds
-      - name: 6/12 Update and Install Feeds
+      # 步骤 7: 切换至 GitHub 镜像并更新 Feeds
+      - name: 7/13 Update and Install Feeds
         working-directory: ${{ env.OPENWRT_DIR }}
         run: |
           echo ">>> Switching to GitHub mirrors for default feeds..."
@@ -97,9 +109,9 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 步骤 7: 集成自定义文件
+      # 步骤 8: 集成自定义文件
       # 从仓库根目录的 openwrt_files/etc 拷贝文件
-      - name: 7/12 Integrate Custom Files
+      - name: 8/13 Integrate Custom Files
         run: |
           echo ">>> Integrating custom files from openwrt_files/etc..."
           CUSTOM_FILES_DIR="${{ github.workspace }}/openwrt_files/etc"
@@ -112,8 +124,8 @@ jobs:
               echo "  -> Custom files directory 'openwrt_files/etc' not found, skipping."
           fi
 
-      # 步骤 8: 生成并合并编译配置文件 (.config)
-      - name: 8/12 Generate and Merge .config
+      # 步骤 9: 生成并合并编译配置文件 (.config)
+      - name: 9/13 Generate and Merge .config
         working-directory: ${{ env.OPENWRT_DIR }}
         run: |
           echo ">>> Generating and merging build configuration (.config)..."
@@ -229,15 +241,15 @@ jobs:
           echo "  -> Regenerating config to include customizations..."
           make defconfig
 
-      # 步骤 9: 下载编译所需的软件包
-      - name: 9/12 Download Packages
+      # 步骤 10: 下载编译所需的软件包
+      - name: 10/13 Download Packages
         working-directory: ${{ env.OPENWRT_DIR }}
         run: |
           echo ">>> Downloading toolchain and packages..."
           make download -j$(nproc)
 
-      # 步骤 10: 开始编译固件
-      - name: 10/12 Start Firmware Compilation
+      # 步骤 11: 开始编译固件
+      - name: 11/13 Start Firmware Compilation
         id: compile
         working-directory: ${{ env.OPENWRT_DIR }}
         run: |
@@ -246,20 +258,20 @@ jobs:
           # Removed V=s flag to reduce log output and prevent truncation.
           make -j$(nproc)
 
-      # 步骤 11: 整理编译产物
+      # 步骤 12: 整理编译产物
       # 将所有 bin 目录下的文件移动到一个单独的文件夹，方便上传
-      - name: 11/12 Organize Artifacts
+      - name: 12/13 Organize Artifacts
         id: organize
         run: |
           echo ">>> Organizing firmware artifacts..."
           ARTIFACT_DIR=openwrt-artifacts
           mkdir -p $ARTIFACT_DIR
           find ${{ env.OPENWRT_DIR }}/bin/targets -type f -print0 | xargs -0 mv -t $ARTIFACT_DIR/
-          echo "artifact_path=$GITHUB_OUTPUT" >> $GITHUB_OUTPUT
+          echo "artifact_path=$ARTIFACT_DIR" >> $GITHUB_OUTPUT
 
-      # 步骤 12: 上传固件产物
+      # 步骤 13: 上传固件产物
       # 当工作流结束后，你可以在 Actions 页面下载这个文件
-      - name: 12/12 Upload Firmware Artifacts
+      - name: 13/13 Upload Firmware Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-firmware-${{ env.OPENWRT_BRANCH }}-${{ github.sha }}
