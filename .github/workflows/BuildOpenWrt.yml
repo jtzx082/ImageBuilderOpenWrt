@@ -9,9 +9,9 @@ on:
   # 允许手动从 Actions 页面触发
   workflow_dispatch:
   # 当 main 分支有 push 事件时触发 (可以根据需要修改分支名)
-#  push:
-#    branches:
-#      - main
+  push:
+    branches:
+      - main
 
 # 全局环境变量
 env:
@@ -214,6 +214,12 @@ jobs:
 
           # --- Services ---
           CONFIG_PACKAGE_openssh-sftp-server=y
+
+          # --- Image configuration ---
+          # 确保固件镜像文件被正确生成
+          CONFIG_TARGET_ROOTFS_EXT4FS=y
+          CONFIG_TARGET_ROOTFS_SQUASHFS=y
+          CONFIG_TARGET_IMAGES_GZIP=y
           EOF
           
           echo "  -> Appending custom configurations..."
