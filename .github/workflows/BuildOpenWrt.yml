@@ -1,173 +1,255 @@
+#
+# GitHub Actions 工作流：编译 OpenWrt 固件
+#
+# 工作流名称
 name: Build OpenWrt Firmware
 
+# 工作流触发条件
 on:
+  # 允许手动从 Actions 页面触发
   workflow_dispatch:
+  # 当 main 分支有 push 事件时触发 (可以根据需要修改分支名)
 #  push:
 #    branches:
 #      - main
 
+# 全局环境变量
 env:
-  REPO_URL: https://github.com/openwrt/openwrt.git
-  REPO_BRANCH: "openwrt-24.10"
-  NIKKI_FEED_URL: "https://github.com/nikkinikki-org/OpenWrt-nikki.git"
-  DDNSGO_FEED_URL: "https://github.com/sirpdboy/luci-app-ddns-go.git"
-  TARGET_BOARD: "x86"
-  TARGET_SUBTARGET: "64"
-  FIRMWARE_NAME: "OpenWrt_Firmware"
+  # OpenWrt 源码 Git 仓库地址
+  OPENWRT_REPO: https://github.com/openwrt/openwrt.git
+  # 指定 OpenWrt 版本分支
+  OPENWRT_BRANCH: openwrt-24.10
+  # 自定义 Feeds 源
+  NIKKI_FEED_URL: https://github.com/nikkinikki-org/OpenWrt-nikki.git
+  DDNSGO_FEED_URL: https://github.com/sirpdboy/luci-app-ddns-go.git
+  # OpenWrt 源码将克隆到此目录
+  OPENWRT_DIR: openwrt
+  # ccache 缓存目录
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
 
 jobs:
   build:
+    # 使用最新版的 Ubuntu 虚拟机
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      # 步骤 1: 检出当前仓库代码
+      # 目的是为了能访问仓库中的 openwrt_files 文件夹
+      - name: 1/12 Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Install build dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential clang flex bison g++ gawk \
-        gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
-        python3-docutils python3-pyelftools python3-setuptools \
-        rsync subversion unzip zlib1g-dev wget xsltproc file ccache
+      # 步骤 2: 清理环境、更新系统并安装编译依赖
+      - name: 2/12 Install Dependencies
+        run: |
+          echo ">>> Cleaning cache, updating system and installing dependencies..."
+          sudo apt-get clean
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+              gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+              python3-docutils python3-pyelftools python3-setuptools \
+              rsync subversion unzip zlib1g-dev wget xsltproc file ccache
 
-    - name: Setup ccache
-      run: |
-        ccache -M 15G
-        ccache -s
+      # 步骤 3: 配置 ccache 编译缓存
+      # 使用 actions/cache 来缓存 ccache 目录，大幅提升后续编译速度
+      - name: 3/12 Configure ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          # 缓存的 key，基于 OpenWrt 分支和配置文件内容
+          key: ${{ runner.os }}-ccache-${{ env.OPENWRT_BRANCH }}-${{ hashFiles('**/config.seed') }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-${{ env.OPENWRT_BRANCH }}-
 
-    - name: Cache build assets
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.ccache
-          openwrt/dl
-          openwrt/staging_dir
-          openwrt/tmp
-        key: ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-${{ hashFiles('**/feeds.conf.default', '**/.config') }}
-        restore-keys: |
-          ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-
+      - name: Initialize ccache
+        run: |
+          echo ">>> Initializing ccache..."
+          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
+          export CCACHE_COMPRESS=1
+          ccache -M 10G
+          echo "  -> ccache configured, current cache size:"
+          ccache -s
 
-    - name: Clone OpenWrt source
-      run: |
-        if [ ! -d "openwrt" ]; then
-          git clone --depth=1 -b ${{ env.REPO_BRANCH }} ${{ env.REPO_URL }} openwrt
-        fi
+      # 步骤 4: 克隆指定版本的 OpenWrt 源码
+      - name: 4/12 Clone OpenWrt Source
+        run: |
+          echo ">>> Cloning OpenWrt branch (${{ env.OPENWRT_BRANCH }})..."
+          git clone --depth 1 --branch ${{ env.OPENWRT_BRANCH }} ${{ env.OPENWRT_REPO }} ${{ env.OPENWRT_DIR }}
+          cd ${{ env.OPENWRT_DIR }}
+          echo "  -> Current branch: $(git rev-parse --abbrev-ref HEAD)"
 
-    - name: Update and install feeds
-      working-directory: ./openwrt
-      run: |
-        if ! grep -q "nikki" "feeds.conf.default"; then
+      # 步骤 5: 添加自定义 Feeds 源
+      - name: 5/12 Add Custom Feeds
+        working-directory: ${{ env.OPENWRT_DIR }}
+        run: |
+          echo ">>> Adding custom Feeds..."
           echo "src-git nikki ${{ env.NIKKI_FEED_URL }}" >> feeds.conf.default
-        fi
-        if ! grep -q "ddnsgo" "feeds.conf.default"; then
           echo "src-git ddnsgo ${{ env.DDNSGO_FEED_URL }}" >> feeds.conf.default
-        fi
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
 
-    - name: Copy custom files
-      run: |
-        if [ -d "${{ github.workspace }}/openwrt_files" ]; then
-          echo "Copying custom files from repository..."
-          rsync -av --delete "${{ github.workspace }}/openwrt_files/" "./openwrt/files/"
-        else
-          echo "No custom files directory found, skipping."
-        fi
+      # 步骤 6: 更新并安装所有 Feeds
+      - name: 6/12 Update and Install Feeds
+        working-directory: ${{ env.OPENWRT_DIR }}
+        run: |
+          echo ">>> Updating and installing all Feeds..."
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
 
-    - name: Generate .config
-      working-directory: ./openwrt
-      run: |
-        rm -f .config .config.old
-        cat > .config <<EOF
-# --- Target System ---
-CONFIG_TARGET_x86=y
-CONFIG_TARGET_x86_64=y
-CONFIG_TARGET_x86_64_Generic=y
-CONFIG_TARGET_ROOTFS_PARTSIZE=1024
+      # 步骤 7: 集成自定义文件
+      # 从仓库根目录的 openwrt_files/etc 拷贝文件
+      - name: 7/12 Integrate Custom Files
+        run: |
+          echo ">>> Integrating custom files from openwrt_files/etc..."
+          CUSTOM_FILES_DIR="${{ github.workspace }}/openwrt_files/etc"
+          if [ -d "$CUSTOM_FILES_DIR" ]; then
+              echo "  -> Copying custom configuration files from repository..."
+              mkdir -p ${{ env.OPENWRT_DIR }}/files
+              # 将 openwrt_files/etc 目录本身拷贝到 openwrt/files/ 下，形成 openwrt/files/etc
+              rsync -av --delete "$CUSTOM_FILES_DIR" "${{ env.OPENWRT_DIR }}/files/"
+          else
+              echo "  -> Custom files directory 'openwrt_files/etc' not found, skipping."
+          fi
 
-# --- Build options ---
-CONFIG_CCACHE=y
+      # 步骤 8: 生成并合并编译配置文件 (.config)
+      - name: 8/12 Generate and Merge .config
+        working-directory: ${{ env.OPENWRT_DIR }}
+        run: |
+          echo ">>> Generating and merging build configuration (.config)..."
+          make defconfig
+          
+          # --- 清理并写入新的 .config 配置 ---
+          cat > .config.add <<'EOF'
+          # --- Build options ---
+          CONFIG_CCACHE=y
 
-# --- Base system ---
-CONFIG_PACKAGE_bash=y
+          # --- Target System ---
+          CONFIG_TARGET_x86=y
+          CONFIG_TARGET_x86_64=y
+          CONFIG_TARGET_x86_64_Generic=y
+          CONFIG_TARGET_ROOTFS_PARTSIZE=1024
 
-# --- Kernel modules (for VM compatibility) ---
-CONFIG_PACKAGE_kmod-fs-ext4=y
-CONFIG_PACKAGE_kmod-usb-core=y
-CONFIG_PACKAGE_kmod-usb2=y
-CONFIG_PACKAGE_kmod-usb3=y
-CONFIG_PACKAGE_kmod-usb-hid=y
-CONFIG_PACKAGE_kmod-e1000=y
-CONFIG_PACKAGE_kmod-vmxnet3=y
+          # --- Base system ---
+          CONFIG_PACKAGE_bash=y
+          CONFIG_PACKAGE_base-files=y
+          CONFIG_PACKAGE_ca-bundle=y
+          CONFIG_PACKAGE_dnsmasq=n
+          CONFIG_PACKAGE_dnsmasq-full=y
+          CONFIG_PACKAGE_dropbear=y
+          CONFIG_PACKAGE_e2fsprogs=y
+          CONFIG_PACKAGE_firewall4=y
+          CONFIG_PACKAGE_fstools=y
+          CONFIG_PACKAGE_grub2-bios-setup=y
+          CONFIG_PACKAGE_logd=y
+          CONFIG_PACKAGE_mkf2fs=y
+          CONFIG_PACKAGE_mtd=y
+          CONFIG_PACKAGE_netifd=y
+          CONFIG_PACKAGE_nftables=y
+          CONFIG_PACKAGE_odhcp6c=y
+          CONFIG_PACKAGE_odhcpd-ipv6only=y
+          CONFIG_PACKAGE_opkg=y
+          CONFIG_PACKAGE_partx-utils=y
+          CONFIG_PACKAGE_ppp=y
+          CONFIG_PACKAGE_ppp-mod-pppoe=y
+          CONFIG_PACKAGE_procd-ujail=y
+          CONFIG_PACKAGE_uci=y
+          CONFIG_PACKAGE_uclient-fetch=y
+          CONFIG_PACKAGE_urandom-seed=y
+          CONFIG_PACKAGE_urngd=y
 
-# --- Network ---
-CONFIG_PACKAGE_dnsmasq=n
-CONFIG_PACKAGE_dnsmasq-full=y
-CONFIG_PACKAGE_firewall4=y
-CONFIG_PACKAGE_iptables-nft=y
+          # --- Kernel modules (VM, NIC, Filesystem, USB, Graphics) ---
+          CONFIG_PACKAGE_kmod-button-hotplug=y
+          CONFIG_PACKAGE_kmod-nft-offload=y
+          CONFIG_PACKAGE_kmod-amazon-ena=y
+          CONFIG_PACKAGE_kmod-amd-xgbe=y
+          CONFIG_PACKAGE_kmod-bnx2=y
+          CONFIG_PACKAGE_kmod-dwmac-intel=y
+          CONFIG_PACKAGE_kmod-e1000=y
+          CONFIG_PACKAGE_kmod-e1000e=y
+          CONFIG_PACKAGE_kmod-forcedeth=y
+          CONFIG_PACKAGE_kmod-igb=y
+          CONFIG_PACKAGE_kmod-igc=y
+          CONFIG_PACKAGE_kmod-ixgbe=y
+          CONFIG_PACKAGE_kmod-r8169=y
+          CONFIG_PACKAGE_kmod-tg3=y
+          CONFIG_PACKAGE_kmod-vmxnet3=y
+          CONFIG_PACKAGE_kmod-fs-ext4=y
+          CONFIG_PACKAGE_kmod-fs-vfat=y
+          CONFIG_PACKAGE_kmod-usb-core=y
+          CONFIG_PACKAGE_kmod-usb2=y
+          CONFIG_PACKAGE_kmod-usb3=y
+          CONFIG_PACKAGE_kmod-usb-hid=y
+          CONFIG_PACKAGE_kmod-drm-i915=y
 
-# --- LuCI ---
-CONFIG_PACKAGE_luci=y
-CONFIG_PACKAGE_uhttpd=y
-CONFIG_PACKAGE_luci-theme-bootstrap=y
-CONFIG_PACKAGE_luci-theme-openwrt=y
+          # --- Network ---
+          CONFIG_PACKAGE_iptables-nft=y
 
-# --- Applications ---
-CONFIG_PACKAGE_luci-app-ttyd=y
-CONFIG_PACKAGE_nikki=y
-CONFIG_PACKAGE_luci-app-nikki=y
-CONFIG_PACKAGE_ddns-go=y
-CONFIG_PACKAGE_luci-app-ddns-go=y
+          # --- LuCI ---
+          CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_uhttpd=y
+          # --- LuCI Themes ---
+          CONFIG_PACKAGE_luci-theme-bootstrap=y
+          CONFIG_PACKAGE_luci-theme-openwrt=y
+          # --- LuCI Translations (Chinese) ---
+          CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-package-manager-zh-cn=y
 
-# --- Utilities ---
-CONFIG_PACKAGE_acpid=y
+          # --- Applications ---
+          # TTYD Terminal
+          CONFIG_PACKAGE_luci-app-ttyd=y
+          CONFIG_PACKAGE_luci-i18n-ttyd-zh-cn=y
+          # Nikki
+          CONFIG_PACKAGE_nikki=y
+          CONFIG_PACKAGE_luci-app-nikki=y
+          CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y
+          # DDNS-GO
+          CONFIG_PACKAGE_ddns-go=y
+          CONFIG_PACKAGE_luci-app-ddns-go=y
+          CONFIG_PACKAGE_luci-i18n-ddns-go-zh-cn=y
 
-# --- Services ---
-CONFIG_PACKAGE_dropbear=y
-CONFIG_PACKAGE_openssh-sftp-server=y
-EOF
-        make defconfig
+          # --- Utilities ---
+          CONFIG_PACKAGE_acpid=y
 
-    - name: Download packages
-      working-directory: ./openwrt
-      run: |
-        make download -j$(nproc)
+          # --- Services ---
+          CONFIG_PACKAGE_openssh-sftp-server=y
+          EOF
+          
+          echo "  -> Appending custom configurations..."
+          cat .config.add >> .config
+          rm .config.add
+          
+          echo "  -> Regenerating config to include customizations..."
+          make defconfig
 
-    - name: Compile firmware
-      working-directory: ./openwrt
-      run: |
-        echo "Starting firmware compilation... (This may take a while)"
-        export CCACHE_DIR=~/.ccache
-        export CCACHE_COMPILERCHECK=content
-        export USE_CCACHE=1
-        ccache -z
-        make -j$(nproc) V=s
-        ccache -s
+      # 步骤 9: 下载编译所需的软件包
+      - name: 9/12 Download Packages
+        working-directory: ${{ env.OPENWRT_DIR }}
+        run: |
+          echo ">>> Downloading toolchain and packages..."
+          make download -j$(nproc)
 
-    - name: Organize firmware files
-      id: organize
-      run: |
-        FIRMWARE_DIR="openwrt/bin/targets/${{ env.TARGET_BOARD }}/${{ env.TARGET_SUBTARGET }}"
-        RELEASE_DIR="${FIRMWARE_DIR}/release"
-        mkdir -p "${RELEASE_DIR}"
-        cp ${FIRMWARE_DIR}/*.gz "${RELEASE_DIR}/"
-        cd "${FIRMWARE_DIR}"
-        sha256sum *.gz > sha256sums.txt
-        mv sha256sums.txt "${RELEASE_DIR}/"
-        echo "path=${RELEASE_DIR}" >> $GITHUB_OUTPUT
+      # 步骤 10: 开始编译固件
+      - name: 10/12 Start Firmware Compilation
+        id: compile
+        working-directory: ${{ env.OPENWRT_DIR }}
+        run: |
+          echo ">>> Starting firmware compilation (this will take a while)..."
+          make -j$(nproc) V=s
 
-    - name: Create Tag and Release
-      uses: softprops/action-gh-release@v2
-      with:
-        name: "OpenWrt Firmware Build ${{ github.run_number }} (${{ env.REPO_BRANCH }})"
-        tag_name: build-${{ env.REPO_BRANCH }}-${{ github.run_number }}
-        body: >
-          **OpenWrt Firmware Automated Build**
-          This release was automatically generated by a GitHub Action.
-          - Branch: ${{ env.REPO_BRANCH }}
-          - Target: ${{ env.TARGET_BOARD }}/${{ env.TARGET_SUBTARGET }}
-          - Triggered by: ${{ github.event_name }}
-        files: ${{ steps.organize.outputs.path }}/*
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 步骤 11: 整理编译产物
+      # 将所有 bin 目录下的文件移动到一个单独的文件夹，方便上传
+      - name: 11/12 Organize Artifacts
+        id: organize
+        run: |
+          echo ">>> Organizing firmware artifacts..."
+          ARTIFACT_DIR=openwrt-artifacts
+          mkdir -p $ARTIFACT_DIR
+          find ${{ env.OPENWRT_DIR }}/bin/targets -type f -print0 | xargs -0 mv -t $ARTIFACT_DIR/
+          echo "artifact_path=$ARTIFACT_DIR" >> $GITHUB_OUTPUT
+
+      # 步骤 12: 上传固件产物
+      # 当工作流结束后，你可以在 Actions 页面下载这个文件
+      - name: 12/12 Upload Firmware Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-firmware-${{ env.OPENWRT_BRANCH }}-${{ github.sha }}
+          path: ${{ steps.organize.outputs.artifact_path }}
+
