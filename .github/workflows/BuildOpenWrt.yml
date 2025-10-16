@@ -9,9 +9,9 @@ on:
   # 允许手动从 Actions 页面触发
   workflow_dispatch:
   # 当 main 分支有 push 事件时触发 (可以根据需要修改分支名)
-  push:
-    branches:
-      - main
+#  push:
+#    branches:
+#      - main
 
 # 全局环境变量
 env:
@@ -236,7 +236,9 @@ jobs:
         working-directory: ${{ env.OPENWRT_DIR }}
         run: |
           echo ">>> Starting firmware compilation (this will take a while)..."
-          make -j$(nproc) V=s
+          # 移除 V=s 标志以减少日志输出，防止因日志过大而被截断
+          # Removed V=s flag to reduce log output and prevent truncation.
+          make -j$(nproc)
 
       # 步骤 11: 整理编译产物
       # 将所有 bin 目录下的文件移动到一个单独的文件夹，方便上传
@@ -247,7 +249,7 @@ jobs:
           ARTIFACT_DIR=openwrt-artifacts
           mkdir -p $ARTIFACT_DIR
           find ${{ env.OPENWRT_DIR }}/bin/targets -type f -print0 | xargs -0 mv -t $ARTIFACT_DIR/
-          echo "artifact_path=$ARTIFACT_DIR" >> $GITHUB_OUTPUT
+          echo "artifact_path=$GITHUB_OUTPUT" >> $GITHUB_OUTPUT
 
       # 步骤 12: 上传固件产物
       # 当工作流结束后，你可以在 Actions 页面下载这个文件
