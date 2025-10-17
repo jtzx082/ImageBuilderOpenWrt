@@ -9,9 +9,9 @@ on:
   # 允许手动从 Actions 页面触发
   workflow_dispatch:
   # 当 main 分支有 push 事件时触发 (可以根据需要修改分支名)
-  push:
-    branches:
-      - main
+#  push:
+#    branches:
+#      - main
 
 # 全局环境变量
 env:
@@ -34,11 +34,11 @@ jobs:
 
     steps:
       # 步骤 1: 检出当前仓库代码
-      - name: 1/14 Checkout Repository
+      - name: 1/15 Checkout Repository
         uses: actions/checkout@v4
 
       # 步骤 2: 清理环境、更新系统并安装编译依赖
-      - name: 2/14 Install Dependencies
+      - name: 2/15 Install Dependencies
         run: |
           echo ">>> Cleaning cache, updating system and installing dependencies..."
           sudo apt-get clean
@@ -49,7 +49,7 @@ jobs:
               rsync subversion unzip zlib1g-dev wget xsltproc file ccache
 
       # 步骤 3: 释放磁盘空间
-      - name: 3/14 Free Up Disk Space
+      - name: 3/15 Free Up Disk Space
         run: |
           echo ">>> Freeing up disk space on the runner..."
           sudo rm -rf /usr/share/dotnet
@@ -60,7 +60,7 @@ jobs:
           df -h
 
       # 步骤 4: 配置 ccache 编译缓存
-      - name: 4/14 Configure ccache
+      - name: 4/15 Configure ccache
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
@@ -78,7 +78,7 @@ jobs:
           ccache -s
 
       # 步骤 5: 克隆指定版本的 OpenWrt 源码
-      - name: 5/14 Clone OpenWrt Source
+      - name: 5/15 Clone OpenWrt Source
         run: |
           echo ">>> Cloning OpenWrt branch (${{ env.OPENWRT_BRANCH }})..."
           git clone --depth 1 --branch ${{ env.OPENWRT_BRANCH }} ${{ env.OPENWRT_REPO }} ${{ env.OPENWRT_DIR }}
@@ -86,7 +86,7 @@ jobs:
           echo "  -> Current branch: $(git rev-parse --abbrev-ref HEAD)"
 
       # 步骤 6: 添加自定义 Feeds 源
-      - name: 6/14 Add Custom Feeds
+      - name: 6/15 Add Custom Feeds
         working-directory: ${{ env.OPENWRT_DIR }}
         run: |
           echo ">>> Adding custom Feeds..."
@@ -94,7 +94,7 @@ jobs:
           echo "src-git ddnsgo ${{ env.DDNSGO_FEED_URL }}" >> feeds.conf.default
 
       # 步骤 7: 切换至 GitHub 镜像并更新 Feeds
-      - name: 7/14 Update and Install Feeds
+      - name: 7/15 Update and Install Feeds
         working-directory: ${{ env.OPENWRT_DIR }}
         run: |
           echo ">>> Switching to GitHub mirrors for default feeds..."
@@ -106,7 +106,7 @@ jobs:
           ./scripts/feeds install -a
 
       # 步骤 8: 集成自定义文件
-      - name: 8/14 Integrate Custom Files
+      - name: 8/15 Integrate Custom Files
         run: |
           echo ">>> Integrating custom files from openwrt_files/etc..."
           CUSTOM_FILES_DIR="${{ github.workspace }}/openwrt_files/etc"
@@ -119,7 +119,7 @@ jobs:
           fi
 
       # 步骤 9: 生成并合并编译配置文件 (.config)
-      - name: 9/14 Generate and Merge .config
+      - name: 9/15 Generate and Merge .config
         working-directory: ${{ env.OPENWRT_DIR }}
         run: |
           echo ">>> Generating and merging build configuration (.config)..."
@@ -235,14 +235,14 @@ jobs:
           make defconfig
 
       # 步骤 10: 下载编译所需的软件包
-      - name: 10/14 Download Packages
+      - name: 10/15 Download Packages
         working-directory: ${{ env.OPENWRT_DIR }}
         run: |
           echo ">>> Downloading toolchain and packages..."
           make download -j$(nproc)
 
       # 步骤 11: 开始编译固件
-      - name: 11/14 Start Firmware Compilation
+      - name: 11/15 Start Firmware Compilation
         id: compile
         working-directory: ${{ env.OPENWRT_DIR }}
         run: |
@@ -250,7 +250,7 @@ jobs:
           make -j$(nproc)
 
       # 步骤 12: 整理固件文件 (排除 .ipk)
-      - name: 12/14 Organize Firmware Files (Exclude .ipk)
+      - name: 12/15 Organize Firmware Files (Exclude .ipk)
         id: organize
         run: |
           echo ">>> Organizing firmware files, excluding .ipk packages..."
@@ -261,22 +261,35 @@ jobs:
           echo "firmware_path=$FIRMWARE_DIR" >> $GITHUB_OUTPUT
 
       # 步骤 13: 上传固件到 Artifacts
-      - name: 13/14 Upload Firmware to Artifacts
+      - name: 13/15 Upload Firmware to Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-firmware-${{ env.OPENWRT_BRANCH }}-${{ github.sha }}
           path: ${{ steps.organize.outputs.firmware_path }}
 
-      # 步骤 14: 创建 Release 并上传固件
-      - name: 14/14 Create Release and Upload Firmware
+      # 步骤 14: 生成发布信息
+      - name: 14/15 Generate Release Information
+        id: release_info
+        run: |
+          # 设置时区为亚洲/上海
+          export TZ='Asia/Shanghai'
+          # 生成唯一的标签名，例如：openwrt-24.10-2025.10.17-0936
+          TAG_NAME="${{ env.OPENWRT_BRANCH }}-$(date +'%Y.%m.%d-%H%M')"
+          # 生成 Release 的标题
+          RELEASE_NAME="OpenWrt ${{ env.OPENWRT_BRANCH }} Build - $(date +'%Y.%m.%d %H:%M %Z')"
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "release_name=${RELEASE_NAME}" >> $GITHUB_OUTPUT
+      
+      # 步骤 15: 创建 Release 并上传固件
+      - name: 15/15 Create Release and Upload Firmware
         uses: softprops/action-gh-release@v2
         with:
           # 使用 GITHUB_TOKEN 进行认证
           token: ${{ secrets.GITHUB_TOKEN }}
-          # 自动生成一个基于日期的标签, 例如: 2025.10.16-2305
-          tag_name: ${{ env.OPENWRT_BRANCH }}-${{ env.TZ }}-${{ env.DATE }}
-          # Release 的标题
-          name: "OpenWrt ${{ env.OPENWRT_BRANCH }} Build - ${{ env.TZ }} ${{ env.DATE }}"
+          # 从上一步获取生成的标签名
+          tag_name: ${{ steps.release_info.outputs.tag_name }}
+          # 从上一步获取生成的 Release 标题
+          name: ${{ steps.release_info.outputs.release_name }}
           # Release 的描述内容
           body: |
             这是由 GitHub Actions 自动编译的 OpenWrt 固件。
@@ -288,9 +301,4 @@ jobs:
           # 设置为正式版, 而不是草稿或预发布
           draft: false
           prerelease: false
-        env:
-          # 设置时区为 UTC+8 (北京时间)
-          TZ: 'Asia/Shanghai'
-          # 获取当前日期和时间
-          DATE: $(date +"%Y.%m.%d-%H%M")
 
