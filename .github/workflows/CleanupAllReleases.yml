@@ -1,8 +1,8 @@
 name: Cleanup All Releases and Tags
 
 on:
-#  schedule:
-#      - cron: '0 20 * * *'   # 每天 UTC 22:00 = 北京时间次日 04:00
+  schedule:
+    - cron: '0 1 * * *'  # 01:00 UTC daily
   workflow_dispatch:         # 仅支持手动触发
 
 jobs:
