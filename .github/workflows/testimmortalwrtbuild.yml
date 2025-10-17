@@ -1,0 +1,322 @@
+#
+# GitHub Actions 工作流：编译并发布 ImmortalWrt 固件
+#
+# 工作流名称
+name: Build and Release ImmortalWrt Firmware
+
+# 工作流触发条件
+on:
+  # 允许手动从 Actions 页面触发
+  workflow_dispatch:
+  # 当 main 分支有 push 事件时触发 (可以根据需要修改分支名)
+#  push:
+#    branches:
+#      - main
+
+# 全局环境变量
+env:
+  # ImmortalWrt 源码 Git 仓库地址
+  IMWRT_REPO: https://github.com/immortalwrt/immortalwrt.git
+  # 指定 ImmortalWrt 版本分支或标签
+  IMWRT_BRANCH: openwrt-24.10
+  # 自定义 Feeds 源
+  NIKKI_FEED_URL: https://github.com/nikkinikki-org/OpenWrt-nikki.git
+  # 源码将克隆到此目录
+  IMWRT_DIR: immortalwrt
+  # ccache 缓存目录
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+
+jobs:
+  build:
+    # 使用最新版的 Ubuntu 虚拟机
+    runs-on: ubuntu-latest
+
+    steps:
+      # 步骤 1: 检出当前仓库代码
+      - name: 1/15 Checkout Repository
+        uses: actions/checkout@v4
+
+      # 步骤 2: 清理环境、更新系统并安装编译依赖
+      - name: 2/15 Install Dependencies
+        run: |
+          echo ">>> Cleaning cache, updating system and installing dependencies..."
+          sudo apt-get clean
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+              gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+              python3-docutils python3-pyelftools python3-setuptools \
+              rsync subversion unzip zlib1g-dev wget xsltproc file ccache
+
+      # 步骤 3: 释放磁盘空间
+      - name: 3/15 Free Up Disk Space
+        run: |
+          echo ">>> Freeing up disk space on the runner..."
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf $AGENT_TOOLSDIRECTORY
+          echo "  -> Space available after cleanup:"
+          df -h
+
+      # 步骤 4: 配置 ccache 编译缓存
+      - name: 4/15 Configure ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ runner.os }}-ccache-${{ env.IMWRT_BRANCH }}-${{ hashFiles('**/config.seed') }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-${{ env.IMWRT_BRANCH }}-
+
+      - name: Initialize ccache
+        run: |
+          echo ">>> Initializing ccache..."
+          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
+          export CCACHE_COMPRESS=1
+          ccache -M 10G
+          echo "  -> ccache configured, current cache size:"
+          ccache -s
+
+      # 步骤 5: 克隆指定版本的 ImmortalWrt 源码
+      - name: 5/15 Clone ImmortalWrt Source
+        run: |
+          echo ">>> Cloning ImmortalWrt branch (${{ env.IMWRT_BRANCH }})..."
+          git clone --depth 1 --branch ${{ env.IMWRT_BRANCH }} ${{ env.IMWRT_REPO }} ${{ env.IMWRT_DIR }}
+          cd ${{ env.IMWRT_DIR }}
+          echo "  -> Current commit: $(git rev-parse HEAD)"
+
+      # 步骤 6: 添加自定义 Feeds 源
+      - name: 6/15 Add Custom Feeds
+        working-directory: ${{ env.IMWRT_DIR }}
+        run: |
+          echo ">>> Adding custom Feeds..."
+          echo "src-git nikki ${{ env.NIKKI_FEED_URL }}" >> feeds.conf.default
+
+      # 步骤 7: 更新并安装所有 Feeds
+      - name: 7/15 Update and Install Feeds
+        working-directory: ${{ env.IMWRT_DIR }}
+        run: |
+          echo ">>> Updating and installing all Feeds..."
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      # 步骤 8: 集成自定义文件
+      - name: 8/15 Integrate Custom Files
+        run: |
+          echo ">>> Integrating custom files from openwrt_files/etc..."
+          CUSTOM_FILES_DIR="${{ github.workspace }}/openwrt_files/etc"
+          if [ -d "$CUSTOM_FILES_DIR" ]; then
+              echo "  -> Copying custom configuration files from repository..."
+              mkdir -p ${{ env.IMWRT_DIR }}/files
+              rsync -av --delete "$CUSTOM_FILES_DIR" "${{ env.IMWRT_DIR }}/files/"
+          else
+              echo "  -> Custom files directory 'openwrt_files/etc' not found, skipping."
+          fi
+
+      # 步骤 9: 生成并合并编译配置文件 (.config)
+      - name: 9/15 Generate and Merge .config
+        working-directory: ${{ env.IMWRT_DIR }}
+        run: |
+          echo ">>> Generating and merging build configuration (.config)..."
+          make defconfig
+          
+          # --- 清理并写入新的 .config 配置 ---
+          cat > .config.add <<'EOF'
+          # --- Build options ---
+          CONFIG_CCACHE=y
+
+          # --- Target System ---
+          CONFIG_TARGET_x86=y
+          CONFIG_TARGET_x86_64=y
+          CONFIG_TARGET_x86_64_Generic=y
+          CONFIG_TARGET_ROOTFS_PARTSIZE=1024
+
+          # --- Base System & Core Utilities ---
+          CONFIG_PACKAGE_autocore=y
+          CONFIG_PACKAGE_automount=y
+          CONFIG_PACKAGE_base-files=y
+          CONFIG_PACKAGE_bash=y
+          CONFIG_PACKAGE_block-mount=y
+          CONFIG_PACKAGE_ca-bundle=y
+          CONFIG_PACKAGE_default-settings-chn=y
+          CONFIG_PACKAGE_dnsmasq-full=y
+          CONFIG_PACKAGE_dropbear=y
+          CONFIG_PACKAGE_fdisk=y
+          CONFIG_PACKAGE_firewall4=y
+          CONFIG_PACKAGE_fstools=y
+          CONFIG_PACKAGE_grub2-bios-setup=y
+          CONFIG_PACKAGE_logd=y
+          CONFIG_PACKAGE_mkf2fs=y
+          CONFIG_PACKAGE_mtd=y
+          CONFIG_PACKAGE_netifd=y
+          CONFIG_PACKAGE_nftables=y
+          CONFIG_PACKAGE_odhcp6c=y
+          CONFIG_PACKAGE_odhcpd-ipv6only=y
+          CONFIG_PACKAGE_opkg=y
+          CONFIG_PACKAGE_partx-utils=y
+          CONFIG_PACKAGE_ppp=y
+          CONFIG_PACKAGE_ppp-mod-pppoe=y
+          CONFIG_PACKAGE_procd-ujail=y
+          CONFIG_PACKAGE_uci=y
+          CONFIG_PACKAGE_uclient-fetch=y
+          CONFIG_PACKAGE_urandom-seed=y
+          CONFIG_PACKAGE_urngd=y
+
+          # --- Libraries ---
+          CONFIG_PACKAGE_libc=y
+          CONFIG_PACKAGE_libgcc=y
+          CONFIG_PACKAGE_libustream-openssl=y
+
+          # --- Firmware ---
+          CONFIG_PACKAGE_i915-firmware-dmc=y
+
+          # --- Kernel Modules ---
+          # Filesystem
+          CONFIG_PACKAGE_kmod-fs-f2fs=y
+          CONFIG_PACKAGE_kmod-fs-vfat=y
+          # Network (General)
+          CONFIG_PACKAGE_kmod-nf-nathelper=y
+          CONFIG_PACKAGE_kmod-nf-nathelper-extra=y
+          CONFIG_PACKAGE_kmod-nft-offload=y
+          # Network (NIC Drivers)
+          CONFIG_PACKAGE_kmod-8139cp=y
+          CONFIG_PACKAGE_kmod-8139too=y
+          CONFIG_PACKAGE_kmod-amazon-ena=y
+          CONFIG_PACKAGE_kmod-amd-xgbe=y
+          CONFIG_PACKAGE_kmod-bnx2=y
+          CONFIG_PACKAGE_kmod-dwmac-intel=y
+          CONFIG_PACKAGE_kmod-e1000=y
+          CONFIG_PACKAGE_kmod-e1000e=y
+          CONFIG_PACKAGE_kmod-forcedeth=y
+          CONFIG_PACKAGE_kmod-i40e=y
+          CONFIG_PACKAGE_kmod-igb=y
+          CONFIG_PACKAGE_kmod-igbvf=y
+          CONFIG_PACKAGE_kmod-igc=y
+          CONFIG_PACKAGE_kmod-ixgbe=y
+          CONFIG_PACKAGE_kmod-ixgbevf=y
+          CONFIG_PACKAGE_kmod-pcnet32=y
+          CONFIG_PACKAGE_kmod-r8101=y
+          CONFIG_PACKAGE_kmod-r8125=y
+          CONFIG_PACKAGE_kmod-r8126=y
+          CONFIG_PACKAGE_kmod-r8168=y
+          CONFIG_PACKAGE_kmod-tg3=y
+          CONFIG_PACKAGE_kmod-tulip=y
+          CONFIG_PACKAGE_kmod-vmxnet3=y
+          # USB
+          CONFIG_PACKAGE_kmod-usb-hid=y
+          CONFIG_PACKAGE_kmod-usb-net=y
+          CONFIG_PACKAGE_kmod-usb-net-asix=y
+          CONFIG_PACKAGE_kmod-usb-net-asix-ax88179=y
+          CONFIG_PACKAGE_kmod-usb-net-rtl8150=y
+          CONFIG_PACKAGE_kmod-usb-net-rtl8152-vendor=y
+          # Misc
+          CONFIG_PACKAGE_kmod-button-hotplug=y
+          CONFIG_PACKAGE_kmod-drm-i915=y
+
+          # --- LuCI ---
+          # Core/Libs
+          CONFIG_PACKAGE_luci-compat=y
+          CONFIG_PACKAGE_luci-lib-base=y
+          CONFIG_PACKAGE_luci-lib-ipkg=y
+          CONFIG_PACKAGE_luci-light=y
+          # Themes
+          CONFIG_PACKAGE_luci-theme-openwrt=y
+          # Applications
+          CONFIG_PACKAGE_luci-app-ddns-go=y
+          CONFIG_PACKAGE_luci-app-nikki=y
+          CONFIG_PACKAGE_luci-app-package-manager=y
+          CONFIG_PACKAGE_luci-app-ttyd=y
+          # Translations (Chinese)
+          CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-ddns-go-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-package-manager-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-ttyd-zh-cn=y
+
+          # --- Applications ---
+          CONFIG_PACKAGE_ddns-go=y
+          CONFIG_PACKAGE_nikki=y
+
+          # --- Services ---
+          CONFIG_PACKAGE_openssh-sftp-server=y
+          
+          # --- Image configuration ---
+          CONFIG_TARGET_ROOTFS_EXT4FS=y
+          CONFIG_TARGET_ROOTFS_SQUASHFS=y
+          CONFIG_TARGET_IMAGES_GZIP=y
+          EOF
+          
+          echo "  -> Appending custom configurations..."
+          cat .config.add >> .config
+          rm .config.add
+          
+          echo "  -> Regenerating config to include customizations..."
+          make defconfig
+
+      # 步骤 10: 下载编译所需的软件包
+      - name: 10/15 Download Packages
+        working-directory: ${{ env.IMWRT_DIR }}
+        run: |
+          echo ">>> Downloading toolchain and packages..."
+          make download -j$(nproc)
+
+      # 步骤 11: 开始编译固件
+      - name: 11/15 Start Firmware Compilation
+        id: compile
+        working-directory: ${{ env.IMWRT_DIR }}
+        run: |
+          echo ">>> Starting firmware compilation (this will take a while)..."
+          make -j$(nproc)
+
+      # 步骤 12: 整理固件文件 (排除 .ipk)
+      - name: 12/15 Organize Firmware Files (Exclude .ipk)
+        id: organize
+        run: |
+          echo ">>> Organizing firmware files, excluding .ipk packages..."
+          FIRMWARE_DIR=immortalwrt-firmware
+          mkdir -p $FIRMWARE_DIR
+          # 查找所有非 .ipk 的文件并移动
+          find ${{ env.IMWRT_DIR }}/bin/targets -type f ! -name '*.ipk' -print0 | xargs -0 mv -t $FIRMWARE_DIR/
+          echo "firmware_path=$FIRMWARE_DIR" >> $GITHUB_OUTPUT
+
+      # 步骤 13: 上传固件到 Artifacts
+      - name: 13/15 Upload Firmware to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-firmware-${{ env.IMWRT_BRANCH }}-${{ github.sha }}
+          path: ${{ steps.organize.outputs.firmware_path }}
+
+      # 步骤 14: 生成发布信息
+      - name: 14/15 Generate Release Information
+        id: release_info
+        run: |
+          # 设置时区为亚洲/上海
+          export TZ='Asia/Shanghai'
+          # 生成唯一的标签名，例如：openwrt-24.10-2025.10.17-0936
+          TAG_NAME="${{ env.IMWRT_BRANCH }}-$(date +'%Y.%m.%d-%H%M')"
+          # 生成 Release 的标题
+          RELEASE_NAME="ImmortalWrt ${{ env.IMWRT_BRANCH }} Build - $(date +'%Y.%m.%d %H:%M %Z')"
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "release_name=${RELEASE_NAME}" >> $GITHUB_OUTPUT
+      
+      # 步骤 15: 创建 Release 并上传固件
+      - name: 15/15 Create Release and Upload Firmware
+        uses: softprops/action-gh-release@v2
+        with:
+          # 使用 GITHUB_TOKEN 进行认证
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # 从上一步获取生成的标签名
+          tag_name: ${{ steps.release_info.outputs.tag_name }}
+          # 从上一步获取生成的 Release 标题
+          name: ${{ steps.release_info.outputs.release_name }}
+          # Release 的描述内容
+          body: |
+            这是由 GitHub Actions 自动编译的 ImmortalWrt 固件。
+            - ImmortalWrt 分支: ${{ env.IMWRT_BRANCH }}
+            - 目标平台: x86/64
+            - 触发提交: ${{ github.sha }}
+          # 指定要上传的文件 (所有在 firmware_path 目录下的文件)
+          files: ${{ steps.organize.outputs.firmware_path }}/*
+          # 设置为正式版, 而不是草稿或预发布
+          draft: false
+          prerelease: false
