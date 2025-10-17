@@ -6,6 +6,8 @@ name: Build and Release ImmortalWrt Firmware
 
 # 工作流触发条件
 on:
+  schedule:
+    - cron: '0 5 * * *'  # 05:00 UTC daily
   # 允许手动从 Actions 页面触发
   workflow_dispatch:
   # 当 main 分支有 push 事件时触发 (可以根据需要修改分支名)
