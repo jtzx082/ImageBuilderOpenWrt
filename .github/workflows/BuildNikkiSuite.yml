@@ -1,8 +1,8 @@
 name: Build Nikki Suite (x86-64)
 
 on:
-  schedule:
-    - cron: '0 8 * * *'  # 08:00 UTC daily
+#  schedule:
+#    - cron: '0 8 * * *'  # 08:00 UTC daily
   workflow_dispatch:
     inputs:
       nikki_ref:
